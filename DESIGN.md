@@ -9,7 +9,8 @@ The CLI wraps a system we do not control (IDRD Portal Ciudadano). Recon ran firs
 - Audience: the owner and the owner's agents, on one Mac. Not published.
 - Written against Node's API surface only (`fs`, `path`, `os`, `crypto`, global `fetch`), so the target is a build decision.
 - `bun build --target=node` → `dist/idrd.js` with a `#!/usr/bin/env node` shebang, so installing does not require Bun (the corpus failure the skill warns about). Bun is a dev tool only (build + tests).
-- Install: `git clone … && cd portal-ciudadano-cli && bun install && bun run build && npm link`.
+- **The built bundle is committed** (`dist/idrd.js`, ~92 KB, dependencies inlined). Install is `git clone` + `npm link` with only Node: no Bun, no build step. The first README said "no Bun needed" while its install block ran `bun install && bun run build` — contradicted by the instructions themselves. Trade-off: `dist/` can drift from `src/`; `bun run verify:dist` rebuilds and fails if the committed bundle differs.
+- Install: `git clone … && cd portal-ciudadano-cli && npm link`.
 
 ## Phase 2: command surface
 

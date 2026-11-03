@@ -1,82 +1,256 @@
 # idrd
 
-CLI **no oficial** del [Portal Ciudadano del IDRD](https://portalciudadano.idrd.gov.co) (Bogotá) para canchas públicas: ver disponibilidad real, reservar y obtener el link de pago PSE. Hecho para que un agente lo opere y una persona lo supervise.
+**Las canchas públicas de Bogotá desde la terminal.** Busca horas libres de tenis, pádel, pickleball y fútbol en los parques del IDRD, revisa una cancha y resérvala con tu cuenta del [Portal Ciudadano](https://portalciudadano.idrd.gov.co). Funciona para personas y para agentes de IA.
 
-> No está afiliado al IDRD. Usa tu propia cuenta del portal. Las reservas **no se pueden cancelar**: el CLI nunca reserva sin una confirmación explícita.
+```text
+$ idrd find --date vie
 
-## Instalar
+Tenis · 2026-11-06 · todo el día · 7 canchas revisadas
+
+ID     Parque            Localidad  Libre
+─────  ────────────────  ─────────  ───────────────
+11537  SAN ANDRES        ENGATIVA   4–10 PM
+11538  SAN ANDRES        ENGATIVA   4–10 PM
+11592  SAN ANDRES        ENGATIVA   4–10 PM
+11593  SAN ANDRES        ENGATIVA   4–7 PM, 9–10 PM
+11611  FONTANAR DEL RIO  SUBA       6–10 PM
+11612  FONTANAR DEL RIO  SUBA       7–10 PM
+
+Próximos pasos:
+  → idrd booking create 11537 --date 2026-11-06 --hour 16  vista previa de la reserva (no reserva nada)
+```
+
+> **Proyecto no oficial.** No está afiliado ni respaldado por el IDRD. Usa tu propia cuenta. Las reservas del portal **no se pueden cancelar**, así que el CLI nunca reserva sin que lo confirmes de forma explícita.
+
+---
+
+## Contenido
+
+- [Requisitos](#requisitos)
+- [Instalación](#instalación)
+- [Primeros pasos](#primeros-pasos)
+- [Comandos](#comandos)
+- [Cómo te protege al reservar](#cómo-te-protege-al-reservar)
+- [Para agentes de IA](#para-agentes-de-ia)
+- [Solución de problemas](#solución-de-problemas)
+- [Privacidad y archivos locales](#privacidad-y-archivos-locales)
+- [Estado del proyecto](#estado-del-proyecto)
+- [Desarrollo](#desarrollo)
+
+---
+
+## Requisitos
+
+- macOS o Linux
+- [Node.js](https://nodejs.org) 20 o superior. Revísalo con `node --version`.
+- Una cuenta del Portal Ciudadano, **solo para reservar**. Buscar canchas y horarios no requiere cuenta.
+
+No necesitas Bun ni compilar nada: el repo trae el ejecutable listo en `dist/`.
+
+## Instalación
+
+Copia y pega el bloque completo en tu terminal:
 
 ```bash
 git clone https://github.com/huayaney-exe/portal-ciudadano-cli.git
 cd portal-ciudadano-cli
-bun install
-bun run build     # genera dist/idrd.js (corre con Node >= 20, no necesita Bun)
-npm link          # deja `idrd` en tu PATH
+npm link
 idrd doctor
 ```
 
-## Uso rápido
+`npm link` deja el comando `idrd` disponible en cualquier carpeta. `idrd doctor` confirma que todo está bien: versión de Node, conexión con el portal y estado de la sesión.
+
+**Actualizar** a la última versión, desde la carpeta del repo:
 
 ```bash
-idrd find --date vie --from 6 --to 9            # horas libres de tenis en todas las canchas
-idrd find --sport padel --date sab               # pádel, pickleball, synthetic, natural
-idrd slot list 11537 --date mie --free           # una cancha en detalle
-idrd court get 11537                             # dirección, superficie, reglas clave
-
-idrd auth login --email tu@correo.com            # pide la contraseña sin mostrarla; no la guarda
-idrd booking create 11537 --date vie --hour 16   # VISTA PREVIA: no reserva nada
-idrd booking create 11537 --date vie --hour 16 --yes --confirm 11537@2026-11-06T16x1   # reserva real
-idrd pay pse <bookingId> --bank 1007 --yes       # si cobra: link de pago PSE
+git pull
 ```
 
-Fechas: `YYYY-MM-DD`, `hoy`, `mañana` o un día (`lun`, `mar`, `mie`, `jue`, `vie`, `sab`, `dom` → próxima ocurrencia).
-Horas: `6`, `6am`, `"6:00 AM"`, `18`, `6pm`.
+**Desinstalar:**
 
-## Cómo protege una reserva
+```bash
+npm unlink -g idrd-cli
+```
 
-1. **Vista previa por defecto.** Sin `--yes`, `booking create` solo muestra qué haría y verifica en vivo: disponibilidad (lo reservable menos lo ya reservado), reglas del portal (máx. 2 h seguidas, 24 h de anticipación, solo la semana publicada), sesión y killswitch.
-2. **Doble confirmación.** Para ejecutar hacen falta `--yes` **y** `--confirm <intent>`, donde el intent lo imprime la vista previa y amarra cancha, fecha, hora y duración.
-3. **Auditoría antes de llamar.** Cada escritura deja un registro `pending` en `~/.idrd/audit/` *antes* de llamar al portal, y luego `ok` o `error`.
-4. **Killswitch.** `idrd killswitch on` bloquea toda reserva y pago, sin importar los flags.
-5. **El pago lo haces tú.** Si la reserva es gratis, se confirma sola. Si cobra, recibes el `bank_url` de PSE y pagas en tu banco.
+## Primeros pasos
 
-## Para agentes
+### 1. Buscar horas libres
 
-- Salida JSON automática cuando stdout no es una terminal (o `--json`). Un objeto por ejecución:
-  `{ok, schemaVersion, command, data, nextSteps[]}` / `{ok:false, error:{code, message, hint}}`.
-- `idrd schema` devuelve el contrato completo y versionado.
-- Códigos de salida: `0` ok · `2` uso/regla · `3` sesión · `4` no existe · `5` rechazado (aprobación, killswitch, horario ocupado) · `6` portal/red.
-- Nunca pregunta en modo no interactivo: falla con un error estructurado.
-- Contraseña sin TTY: `IDRD_PASSWORD=… idrd auth login --email …` o `--password-stdin`.
-- Login: el portal usa un cliente OAuth web público (el mismo que recibe cualquier navegador). El CLI lo descubre del frontend del portal y lo cachea una semana; se puede fijar con `IDRD_CLIENT_ID` / `IDRD_CLIENT_SECRET`.
-- Manual completo: [`skills/idrd/SKILL.md`](skills/idrd/SKILL.md) (instalable con `npx skills add huayaney-exe/portal-ciudadano-cli`).
+En todas las canchas de tenis, un día y una franja horaria:
 
-## Archivos locales
+```bash
+idrd find --date vie --from 6 --to 9
+```
 
-`~/.idrd/` (o `IDRD_HOME`): `config.json` (solo tu correo), `web-client.json` (config pública de login del portal, caché 0600), `sessions/<perfil>/current.json` (token, 0600), `bookings/<perfil>/` (reservas creadas aquí, 0600), `audit/AAAA-MM-DD.jsonl`, `KILLSWITCH`.
+Otro deporte, o filtrando por localidad:
 
-## Primera reserva real (pendiente)
+```bash
+idrd find --sport padel --date sab
+idrd find --date mañana --locality usaquen
+```
 
-Todo el flujo de escritura está implementado según el código del propio portal y cubierto por pruebas contra un simulador, pero **todavía no se ha ejecutado una reserva real**. La primera vez:
+Una cancha en detalle, y su información (dirección, superficie, reglas):
+
+```bash
+idrd slot list 11537 --date mie --free
+idrd court get 11537
+```
+
+### 2. Iniciar sesión
 
 ```bash
 idrd auth login --email tu@correo.com
-idrd booking create <id> --date <día> --hour <h>      # revisa que todos los checks estén en verde
-idrd booking create … --yes --confirm <intent>
-cat ~/.idrd/bookings/default/*.json                    # respuesta real del portal: confirma la forma
 ```
 
-Si algo no coincide, el error trae el mensaje del portal y el audit log queda con el detalle.
+Te pide la contraseña sin mostrarla en pantalla y **no la guarda**: solo se guarda el token de sesión, que dura 8 horas y se renueva solo.
+
+### 3. Reservar
+
+Primero la **vista previa**, que no reserva nada:
+
+```bash
+idrd booking create 11537 --date vie --hour 16
+```
+
+La vista previa verifica en vivo que el horario siga libre, que cumpla las reglas del portal y que tu sesión sea válida. Al final te muestra el comando exacto para reservar de verdad, con un código de confirmación como este:
+
+```bash
+idrd booking create 11537 --date vie --hour 16 --yes --confirm 11537@2026-11-06T16x1
+```
+
+- Si la reserva es **gratis**, queda confirmada y recibes el link del comprobante.
+- Si **cobra**, elige tu banco y genera el link de pago PSE. El pago lo haces tú en tu banco:
+
+```bash
+idrd pay banks
+idrd pay pse <id-de-la-reserva> --bank 1007 --yes
+```
+
+## Comandos
+
+| Comando | Qué hace | ¿Cuenta? |
+|---|---|---|
+| `idrd find` | Busca horas libres en todas las canchas de un deporte | No |
+| `idrd slot list <cancha>` | Horas de una cancha en una fecha, libres y reservadas | No |
+| `idrd court list` | Lista las canchas reservables de un deporte | No |
+| `idrd court get <cancha>` | Dirección, horario del parque, superficie y reglas de uso | No |
+| `idrd auth login` / `status` / `logout` | Iniciar sesión, ver el estado, cerrar sesión | — |
+| `idrd booking create <cancha>` | Vista previa de la reserva, o reserva real con `--yes --confirm` | Sí |
+| `idrd booking list` | Tus reservas | Sí |
+| `idrd pay banks` | Bancos disponibles en PSE | No |
+| `idrd pay pse <reserva>` | Link de pago PSE de una reserva | Sí |
+| `idrd pay status <código>` | Estado de un pago | Sí |
+| `idrd doctor` | Diagnóstico del entorno y la conexión | No |
+| `idrd killswitch on` / `off` | Bloquea o desbloquea toda reserva y pago | No |
+| `idrd schema` | Contrato completo en JSON, para agentes | No |
+
+Ayuda de cualquier comando: `idrd <comando> --help`.
+
+**Opciones frecuentes**
+
+| Opción | Ejemplos | Default |
+|---|---|---|
+| `--date` | `2026-11-06`, `hoy`, `mañana`, `lun`, `mar`, `mie`, `jue`, `vie`, `sab`, `dom` | hoy (en `find`, mañana) |
+| `--hour`, `--from`, `--to` | `6`, `6am`, `"6:00 AM"`, `18`, `6pm` | todo el día |
+| `--sport` | `tennis`, `padel`, `pickleball`, `synthetic`, `natural` | `tennis` |
+| `--hours` | `1` o `2` (el portal permite máximo 2 seguidas) | `1` |
+
+Los nombres de día apuntan a la **próxima** ocurrencia, contando hoy. Todas las horas son de Bogotá.
+
+## Cómo te protege al reservar
+
+1. **Vista previa por defecto.** Sin `--yes`, `booking create` solo muestra lo que haría.
+2. **Confirmación doble.** Para reservar de verdad necesitas `--yes` **y** `--confirm <código>`. El código lo imprime la vista previa e incluye cancha, fecha, hora y duración, así que no se puede reservar algo distinto por error.
+3. **Revisión en vivo justo antes de reservar.** Se verifica que el horario siga libre, las reglas del portal (máximo 2 horas seguidas, 24 horas de anticipación, solo la semana publicada) y tu sesión.
+4. **Registro antes de actuar.** Cada reserva o pago deja un registro en `~/.idrd/audit/` *antes* de llamar al portal.
+5. **Killswitch.** `idrd killswitch on` bloquea cualquier reserva o pago, sin importar las opciones que se pasen.
+6. **El pago es tuyo.** El CLI nunca toca tarjetas ni claves del banco. Para reservas pagas solo te entrega el link de PSE.
+
+Reglas del portal que conviene saber: la semana se publica los **lunes a las 9:00 a.m.**, se reserva con **24 horas** de anticipación como mínimo, se permiten **máximo 2 horas por día y 4 por semana**, y **no hay devolución** por inasistencia.
+
+## Para agentes de IA
+
+- Si stdout no es una terminal, la salida es **JSON automático**, o con `--json`. Es un objeto por ejecución:
+  - éxito: `{ok: true, schemaVersion, command, data, nextSteps[]}`
+  - error: `{ok: false, error: {code, message, hint}}`
+- `idrd schema` devuelve el contrato completo y versionado.
+- Códigos de salida: `0` ok · `2` uso o regla · `3` falta sesión · `4` no existe · `5` rechazado (falta confirmación, killswitch, horario ocupado) · `6` portal o red.
+- Nunca se queda esperando una respuesta: si falta algo, falla con un error estructurado.
+- Login sin terminal: variable `IDRD_PASSWORD` u opción `--password-stdin`.
+- Manual para agentes: [`skills/idrd/SKILL.md`](skills/idrd/SKILL.md). Instálalo con `npx skills add huayaney-exe/portal-ciudadano-cli`.
+
+## Solución de problemas
+
+**`zsh: parse error near ')'` al pegar comandos.**
+Pegaste líneas que tenían comentarios (`# …`). Por defecto zsh no acepta comentarios en la terminal interactiva. Los bloques de este README no tienen comentarios. Si quieres que zsh los acepte, ejecuta `setopt interactivecomments`, o agrégalo a tu `~/.zshrc`.
+
+**`idrd: command not found` después de `npm link`.**
+La carpeta de ejecutables globales de npm no está en tu `PATH`. Revisa cuál es con `npm prefix -g`; los ejecutables quedan en `<esa ruta>/bin`, y esa carpeta tiene que estar en tu `PATH`.
+
+**`node: command not found` o una versión menor a 20.**
+Instala Node 20 o superior desde [nodejs.org](https://nodejs.org), o con `brew install node`.
+
+**`auth/invalid-credentials`.**
+El correo o la contraseña no coinciden con tu cuenta del portal. Pruébalos directamente en [portalciudadano.idrd.gov.co](https://portalciudadano.idrd.gov.co).
+
+**`auth/web-client` o `upstream/web-client`.**
+El portal cambió su configuración de login. Borra `~/.idrd/web-client.json` y vuelve a intentar. Si sigue fallando, abre un issue.
+
+**`rule/violation` o `slot/unavailable` al reservar.**
+El horario no cumple una regla del portal o ya lo tomó otra persona. El mensaje dice cuál fue el problema. Corre `idrd slot list <cancha> --date <día> --free` para ver alternativas.
+
+**Cualquier otro error.**
+`idrd doctor` muestra qué está fallando. Si agregas `DEBUG=1` antes del comando, verás el detalle técnico.
+
+## Privacidad y archivos locales
+
+Todo queda en tu equipo, en `~/.idrd/` (puedes cambiar la ubicación con `IDRD_HOME`):
+
+| Archivo | Contenido |
+|---|---|
+| `config.json` | Solo tu correo, para no pedirlo cada vez |
+| `sessions/<perfil>/current.json` | Token de sesión, permisos 0600 |
+| `web-client.json` | Configuración pública de login del portal, en caché por 7 días |
+| `bookings/<perfil>/` | Reservas creadas desde este equipo, permisos 0600 |
+| `audit/AAAA-MM-DD.jsonl` | Registro de reservas y pagos, sin tokens |
+| `KILLSWITCH` | Si existe, toda escritura queda bloqueada |
+
+Tu contraseña **nunca** se guarda en disco. El CLI no envía datos a ningún servicio distinto del portal del IDRD, salvo una consulta a `api.ipify.org` para obtener tu IP pública, que la pasarela PSE exige al generar un pago.
+
+## Estado del proyecto
+
+| Parte | Estado |
+|---|---|
+| Buscar canchas y horarios (5 deportes) | ✅ Verificado contra el portal real |
+| Inicio de sesión | ✅ Verificado contra el portal real |
+| Bancos PSE | ✅ Verificado contra el portal real |
+| Crear reserva y confirmar reserva gratuita o pago PSE | 🟡 Implementado a partir del código del propio portal y cubierto por pruebas con un simulador. **Todavía no se ha ejecutado una reserva real.** |
+| Tope de 4 horas por semana | ℹ️ Lo valida el portal, no el CLI |
+
+Si haces la primera reserva real, tu respuesta queda guardada en `~/.idrd/bookings/`. Si algo no coincide con lo esperado, el error muestra el mensaje del portal.
 
 ## Desarrollo
 
+Para modificar el código necesitas [Bun](https://bun.sh):
+
 ```bash
-bun run check     # typecheck + 66 pruebas + build
+bun install
+bun run check
+```
+
+`bun run check` corre el typecheck, las 66 pruebas y el build. Después de cambiar algo en `src/`, ejecuta `bun run build` y haz commit también de `dist/idrd.js`: es lo que usa quien instala sin Bun.
+
+Para probar sin instalar:
+
+```bash
 bun run dev -- find --date vie
 ```
 
-Diseño, decisiones y lo verificado vs. no verificado: [`DESIGN.md`](DESIGN.md). Reconocimiento del portal: [`docs/recon.md`](docs/recon.md). Bitácora de fricción: [`friction.md`](friction.md).
+Más detalle:
+- [`DESIGN.md`](DESIGN.md): decisiones de diseño, y qué está verificado y qué no.
+- [`docs/recon.md`](docs/recon.md): cómo funciona la API del portal.
+- [`friction.md`](friction.md): bitácora de construcción.
 
 ## Licencia
 
-MIT. Proyecto personal no oficial; no está afiliado ni respaldado por el IDRD.
+[MIT](LICENSE).

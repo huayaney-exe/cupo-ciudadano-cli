@@ -5,7 +5,7 @@ description: "Operate the unofficial `idrd` CLI for Bogotá's IDRD Portal Ciudad
 
 # idrd
 
-Agent manual for the `idrd` CLI. Install: `git clone https://github.com/huayaney-exe/portal-ciudadano-cli.git && cd portal-ciudadano-cli && bun install && bun run build && npm link`, then `idrd doctor`.
+Agent manual for the `idrd` CLI. Install (Node >= 20, no Bun needed): `git clone https://github.com/huayaney-exe/portal-ciudadano-cli.git && cd portal-ciudadano-cli && npm link`, then `idrd doctor`.
 
 ## Ground rules
 

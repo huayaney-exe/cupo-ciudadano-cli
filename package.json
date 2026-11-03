@@ -18,19 +18,18 @@
     "dev": "bun src/bin.ts",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
-    "check": "bun run typecheck && bun test && bun run build"
+    "check": "bun run typecheck && bun test && bun run build",
+    "verify:dist": "bun run build && git diff --quiet -- dist/ || (echo \"dist/idrd.js no coincide con src/: haz commit del build\" && exit 1)"
   },
   "license": "MIT",
   "devDependencies": {
     "@types/bun": "^1.4.4",
     "@types/node": "^26.6.6",
-    "typescript": "^7.0.2"
+    "typescript": "^7.0.2",
+    "picocolors": "^1.1.1"
   },
   "registries": {
     "@cligentic": "https://cligentic.railly.dev/r/{name}.json"
-  },
-  "dependencies": {
-    "picocolors": "^1.1.1"
   },
   "repository": {
     "type": "git",
