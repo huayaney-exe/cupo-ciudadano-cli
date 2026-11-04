@@ -12,7 +12,7 @@ const fold = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCa
 
 export function courtId(raw: string): number {
   const n = Number(raw);
-  if (!Number.isInteger(n) || n <= 0) fail("usage/bad-id", `Id de espacio inválido: ${raw}.`, "Usa el id de `idrd court list`.");
+  if (!Number.isInteger(n) || n <= 0) fail("usage/bad-id", `Id de espacio inválido: ${raw}.`, "Usa el id de `cupo idrd court list`.");
   return n;
 }
 
@@ -52,17 +52,17 @@ export async function courtList(ctx: Ctx) {
     nextSteps: first
       ? spec.needs === "lane"
         ? [
-            { command: `idrd court lanes ${first.id}`, description: "carriles de una piscina" },
-            { command: `idrd find --sport pool --date mañana --from 6 --to 9`, description: "buscar cupos en todas las piscinas y carriles" },
+            { command: `cupo idrd court lanes ${first.id}`, description: "carriles de una piscina" },
+            { command: `cupo idrd find --sport pool --date mañana --from 6 --to 9`, description: "buscar cupos en todas las piscinas y carriles" },
           ]
         : spec.needs === "sport"
           ? [
-              { command: `idrd court sports ${first.id}`, description: "deportes que admite el coliseo" },
-              { command: `idrd slot list ${first.id} --date mañana --free`, description: "horas libres" },
+              { command: `cupo idrd court sports ${first.id}`, description: "deportes que admite el coliseo" },
+              { command: `cupo idrd slot list ${first.id} --date mañana --free`, description: "horas libres" },
             ]
           : [
-              { command: `idrd slot list ${first.id} --date mañana --free`, description: `horas libres de ${spec.noun === "cancha" ? "una cancha" : `un ${spec.noun}`}` },
-              { command: `idrd find --sport ${sport} --date mañana --from 6 --to 9`, description: "buscar en todos a la vez" },
+              { command: `cupo idrd slot list ${first.id} --date mañana --free`, description: `horas libres de ${spec.noun === "cancha" ? "una cancha" : `un ${spec.noun}`}` },
+              { command: `cupo idrd find --sport ${sport} --date mañana --from 6 --to 9`, description: "buscar en todos a la vez" },
             ]
       : [],
   };
@@ -91,13 +91,13 @@ export async function courtGet(ctx: Ctx) {
         d.park?.email ? `${muted("Contacto")}   ${d.park.email}` : "",
         lanes.length ? `${muted("Carriles")}   ${lanes.map((l) => `${l.id} (${l.name} ${l.level} ${l.direction}, ${l.quota ?? "?"} cupos)`).join(" · ")}` : "",
         sports.length ? `${muted("Deportes")}   ${sports.map((s) => `${s.id} ${s.name}`).join(" · ")}` : "",
-        keyRules(d.endowment.rules).length ? `\n${dim("Para reservar:")}\n${keyRules(d.endowment.rules).map((l) => `  • ${l}`).join("\n")}\n${dim("  Reglas completas: idrd court get " + d.court.id + " --json (endowment.rules)")}` : "",
+        keyRules(d.endowment.rules).length ? `\n${dim("Para reservar:")}\n${keyRules(d.endowment.rules).map((l) => `  • ${l}`).join("\n")}\n${dim("  Reglas completas: cupo idrd court get " + d.court.id + " --json (endowment.rules)")}` : "",
       ].filter(Boolean).join("\n"),
     nextSteps: lanes[0]
-      ? [{ command: `idrd slot list ${id} --lane ${lanes[0].id} --date mañana`, description: "cupos por hora en un carril" }]
+      ? [{ command: `cupo idrd slot list ${id} --lane ${lanes[0].id} --date mañana`, description: "cupos por hora en un carril" }]
       : sports[0]
-        ? [{ command: `idrd slot list ${id} --sport-id ${sports[0].id} --date mañana`, description: "horas para ese deporte" }]
-        : [{ command: `idrd slot list ${id} --date mañana`, description: "ver horas" }],
+        ? [{ command: `cupo idrd slot list ${id} --sport-id ${sports[0].id} --date mañana`, description: "horas para ese deporte" }]
+        : [{ command: `cupo idrd slot list ${id} --date mañana`, description: "ver horas" }],
   };
 }
 
@@ -110,7 +110,7 @@ export async function courtLanes(ctx: Ctx) {
       lanes.length === 0
         ? "Esta dotación no tiene carriles (¿no es una piscina?)."
         : table(["Carril", "Nombre", "Nivel", "Sentido", "Cupos"], lanes.map((l) => [strong(String(l.id)), l.name, l.level, l.direction, String(l.quota ?? "—")]), [8, 8, 10, 12, 6]),
-    nextSteps: lanes[0] ? [{ command: `idrd slot list ${id} --lane ${lanes[0].id} --date mañana --free`, description: "cupos libres en ese carril" }] : [],
+    nextSteps: lanes[0] ? [{ command: `cupo idrd slot list ${id} --lane ${lanes[0].id} --date mañana --free`, description: "cupos libres en ese carril" }] : [],
   };
 }
 
@@ -120,7 +120,7 @@ export async function courtSports(ctx: Ctx) {
   return {
     data: sports,
     human: () => (sports.length === 0 ? "Esta dotación no publica deportes (¿no es un coliseo?)." : sports.map((s) => `  ${strong(String(s.id).padEnd(4))} ${s.name}`).join("\n")),
-    nextSteps: sports[0] ? [{ command: `idrd slot list ${id} --sport-id ${sports[0].id} --date mañana --free`, description: "horas libres para ese deporte" }] : [],
+    nextSteps: sports[0] ? [{ command: `cupo idrd slot list ${id} --sport-id ${sports[0].id} --date mañana --free`, description: "horas libres para ese deporte" }] : [],
   };
 }
 
@@ -158,7 +158,7 @@ export async function calendarOptions(ctx: Ctx, id: number, sched: Schedule): Pr
   const document = str(ctx.args, "document");
   if (spec.needs === "lane" && lane === undefined) {
     const lanes = await listLanes(id).catch(() => [] as Lane[]);
-    fail("usage/missing-lane", "Las piscinas se consultan y reservan por carril.", lanes.length ? `Usa --lane <id>. Carriles: ${lanes.map((l) => `${l.id} (${l.name} ${l.level})`).join(", ")}.` : `Corre \`idrd court lanes ${id}\`.`);
+    fail("usage/missing-lane", "Las piscinas se consultan y reservan por carril.", lanes.length ? `Usa --lane <id>. Carriles: ${lanes.map((l) => `${l.id} (${l.name} ${l.level})`).join(", ")}.` : `Corre \`cupo idrd court lanes ${id}\`.`);
   }
   return { lane, sportId, document };
 }
@@ -186,13 +186,13 @@ export async function slotList(ctx: Ctx) {
         bold(`${sched.endowment.description || `${spec.noun} ${id}`} · ${sched.park.name} · ${date}${opts.lane ? ` · carril ${opts.lane}` : ""}`),
         outside ? `${info("!")} El portal solo publica la semana ${weekDates[0]} a ${weekDates[weekDates.length - 1]}.` : "",
         spec.block ? renderBlocks(bs) : renderSlots(slots),
-        spec.needs === "sport" && opts.sportId === undefined ? dim(`  Para reservar hace falta --sport-id (idrd court sports ${id}).`) : "",
+        spec.needs === "sport" && opts.sportId === undefined ? dim(`  Para reservar hace falta --sport-id (cupo idrd court sports ${id}).`) : "",
       ].filter(Boolean).join("\n"),
     nextSteps: spec.block && freeBlock
-      ? [{ command: `idrd booking create ${id} --date ${date} --hour ${freeBlock.from} --hours ${freeBlock.to - freeBlock.from}${extra}`, description: "vista previa de la reserva del bloque (no reserva nada)" }]
+      ? [{ command: `cupo idrd booking create ${id} --date ${date} --hour ${freeBlock.from} --hours ${freeBlock.to - freeBlock.from}${extra}`, description: "vista previa de la reserva del bloque (no reserva nada)" }]
       : first
-        ? [{ command: `idrd booking create ${id} --date ${date} --hour ${first[0]}${first.length > 1 && spec.capacity === "exclusive" && !spec.block ? " --hours 2" : ""}${extra}`, description: "vista previa de la reserva (no reserva nada)" }]
-        : [{ command: `idrd find --sport ${sched.endowment.sport} --date ${date}`, description: "buscar en otros espacios" }],
+        ? [{ command: `cupo idrd booking create ${id} --date ${date} --hour ${first[0]}${first.length > 1 && spec.capacity === "exclusive" && !spec.block ? " --hours 2" : ""}${extra}`, description: "vista previa de la reserva (no reserva nada)" }]
+        : [{ command: `cupo idrd find --sport ${sched.endowment.sport} --date ${date}`, description: "buscar en otros espacios" }],
   };
 }
 
@@ -269,8 +269,8 @@ export async function slotFind(ctx: Ctx) {
       )}${failed.length ? dim(`\n\n${failed.length} no respondieron.`) : ""}`;
     },
     nextSteps: best
-      ? [{ command: `idrd booking create ${best.court.id} --date ${date} --hour ${best.freeHours[0]}${bestExtra}`, description: "vista previa de la reserva (no reserva nada)" }]
-      : [{ command: `idrd find --date ${addDays(date, 1)} --sport ${sport}`, description: "probar otro día" }],
+      ? [{ command: `cupo idrd booking create ${best.court.id} --date ${date} --hour ${best.freeHours[0]}${bestExtra}`, description: "vista previa de la reserva (no reserva nada)" }]
+      : [{ command: `cupo idrd find --date ${addDays(date, 1)} --sport ${sport}`, description: "probar otro día" }],
   };
 }
 

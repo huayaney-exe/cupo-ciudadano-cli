@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { COURTS, schedule } from "./harness.ts";
 
-const BIN = join(import.meta.dir, "../../dist/idrd.js");
+const BIN = join(import.meta.dir, "../../dist/cupo.js");
 const ANSI = /\x1b\[/;
 let server: ReturnType<typeof Bun.serve>;
 let home: string;
@@ -49,27 +49,27 @@ async function cli(args: string[], env: Record<string, string> = {}, opts: { tty
 
 describe("agent-first rules", () => {
   test("rule: JSON automatically when stdout is not a TTY", async () => {
-    const r = await cli(["court", "list"]);
+    const r = await cli(["idrd", "court", "list"]);
     expect(r.code).toBe(0);
     const j = JSON.parse(r.stdout);
-    expect(j).toMatchObject({ ok: true, command: "court list", schemaVersion: 1 });
+    expect(j).toMatchObject({ ok: true, command: "idrd court list", schemaVersion: 1 });
   });
   test("rule: machine mode has no ANSI and nothing on stderr", async () => {
-    const r = await cli(["slot", "list", "11537", "--date", "2026-11-05"]);
+    const r = await cli(["idrd", "slot", "list", "11537", "--date", "2026-11-05"]);
     expect(r.stdout).not.toMatch(ANSI);
     expect(r.stderr).toBe("");
     expect(r.stdout.trim().split("\n")).toHaveLength(1);
   });
   test("rule: errors are structured with distinguishable exit codes", async () => {
-    const usage = await cli(["slot", "list", "11537", "--date", "ayer"]);
+    const usage = await cli(["idrd", "slot", "list", "11537", "--date", "ayer"]);
     expect(usage.code).toBe(2);
     expect(JSON.parse(usage.stdout).error.code).toBe("usage/bad-date");
-    const auth = await cli(["booking", "list"]);
+    const auth = await cli(["idrd", "booking", "list"]);
     expect(auth.code).toBe(3);
   });
   test("rule: no prompt blocks a non-interactive run", async () => {
     const t0 = Date.now();
-    const r = await cli(["auth", "login", "--email", "a@b.co"], { IDRD_PASSWORD: "" });
+    const r = await cli(["idrd", "auth", "login", "--email", "a@b.co"], { IDRD_PASSWORD: "" });
     expect(Date.now() - t0).toBeLessThan(5000);
     expect(r.code).toBe(3);
     expect(JSON.parse(r.stdout).error.code).toBe("auth/password-required");
@@ -85,15 +85,15 @@ describe("agent-first rules", () => {
     expect(JSON.parse(piped.stdout).error.code).toBe("usage/no-command");
   });
   test("rule: human mode in a TTY is styled; NO_COLOR keeps the content", async () => {
-    const colored = await cli(["court", "list"], {}, { tty: true });
+    const colored = await cli(["idrd", "court", "list"], {}, { tty: true });
     expect(colored.stdout).toMatch(ANSI);
     expect(colored.stdout).toContain("SAN ANDRES");
-    const plain = await cli(["court", "list"], { NO_COLOR: "1" }, { tty: true });
+    const plain = await cli(["idrd", "court", "list"], { NO_COLOR: "1" }, { tty: true });
     expect(plain.stdout).not.toMatch(ANSI);
     expect(plain.stdout).toContain("SAN ANDRES");
   });
   test("rule: --json forces machine mode even in a TTY", async () => {
-    const r = await cli(["court", "list", "--json"], {}, { tty: true });
+    const r = await cli(["idrd", "court", "list", "--json"], {}, { tty: true });
     expect(JSON.parse(r.stdout.trim()).ok).toBe(true);
   });
 });

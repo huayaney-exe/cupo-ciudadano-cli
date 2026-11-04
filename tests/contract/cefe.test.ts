@@ -66,7 +66,7 @@ describe("cefe pools and slots (public)", () => {
       { time: "09:45", start: "2026-11-05T09:45:00", end: "2026-11-05T10:45:00", capacity: 10, reserved: 0, free: 10, closed: false, available: true },
     ]);
     expect(r.json.data.priceEstimate).toBe(10000);
-    expect(r.json.nextSteps[0].command).toBe("idrd cefe booking create pool-sem --date 2026-11-05 --time 07:15");
+    expect(r.json.nextSteps[0].command).toBe("cupo cefe booking create pool-sem --date 2026-11-05 --time 07:15");
     const mon = await run(["cefe", "slot", "list", "pool-sem", "--date", "2026-11-09", "--json"]);
     expect(mon.json.data.slots).toEqual([]);
     const today = await run(["cefe", "slot", "list", "pool-sem", "--date", "2026-11-03", "--json"]); // default config, clock 10:00 → all three past

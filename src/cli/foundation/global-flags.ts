@@ -12,7 +12,7 @@
 //   emit(data, flags);  // json-mode reads flags.json
 //   note("loading...", flags);  // respects flags.quiet
 
-// hybrid (idrd): env vars namespaced as IDRD_JSON / IDRD_PROFILE.
+// hybrid (cupo): env vars namespaced as CUPO_JSON / CUPO_PROFILE (IDRD_* still read).
 export type GlobalFlags = {
   /** Emit JSON output for agents. Implied when stdout is piped. */
   json: boolean;
@@ -36,9 +36,9 @@ export type GlobalFlags = {
  */
 export function parseGlobalFlags(raw: Record<string, unknown> = {}): GlobalFlags {
   return {
-    json: Boolean(raw.json ?? process.env.IDRD_JSON === "1"),
+    json: Boolean(raw.json ?? (process.env.CUPO_JSON ?? process.env.IDRD_JSON) === "1"),
     dryRun: Boolean(raw.dryRun ?? raw["dry-run"] ?? false),
-    profile: (raw.profile as string) ?? process.env.IDRD_PROFILE ?? undefined,
+    profile: (raw.profile as string) ?? process.env.CUPO_PROFILE ?? process.env.IDRD_PROFILE ?? undefined,
     noInput: Boolean(raw.noInput ?? raw["no-input"] ?? process.env.CI === "true"),
     quiet: Boolean(raw.quiet ?? raw.q ?? false),
     verbose: Boolean(raw.verbose ?? raw.v ?? false),

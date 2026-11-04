@@ -1,35 +1,36 @@
-# idrd
+# cupo
 
-**Los parques públicos de Bogotá desde la terminal.** Todo lo que se reserva en el [Portal Ciudadano](https://portalciudadano.idrd.gov.co) del IDRD: canchas de tenis, pádel, pickleball y fútbol, piscinas por carril, asadores, gimnasios CEFE (por hora o mensualidad) y coliseos; además las escuelas y programas deportivos con inscripción, y los pagos de tu cuenta. Busca horas libres, revisa un espacio y resérvalo con tu cuenta. Funciona para personas y para agentes de IA.
+**Consigue cupo para hacer deporte en Bogotá, desde la terminal.** Dile qué quieres hacer y cuándo; `cupo` busca en todos los sistemas de reservas públicos que conoce y te deja el cupo a un comando de distancia. Hoy cubre el [Portal Ciudadano del IDRD](https://portalciudadano.idrd.gov.co) (parques de toda la ciudad) y el [CEFE Chapinero](https://cefechapinero.com). Funciona para personas y para agentes de IA.
 
 ```text
-$ idrd find --date vie
+$ cupo find --sport pool --date sab --from 6 --to 10
 
-Tenis · 2026-11-06 · todo el día · 45 canchas revisadas
+Piscinas · 2026-11-07 · 06:00–10:00 · IDRD · Portal Ciudadano (37) + CEFE Chapinero (2)
 
-ID     Parque            Localidad  Libre
-─────  ────────────────  ─────────  ───────────────
-11537  SAN ANDRES        ENGATIVA   4–10 PM
-11538  SAN ANDRES        ENGATIVA   4–10 PM
-11592  SAN ANDRES        ENGATIVA   4–10 PM
-11593  SAN ANDRES        ENGATIVA   4–7 PM, 9–10 PM
-11611  FONTANAR DEL RIO  SUBA       6–10 PM
-11612  FONTANAR DEL RIO  SUBA       7–10 PM
+Dónde                                     Localidad  Libre                                 Reservar con
+────────────────────────────────────────  ─────────  ────────────────────────────────────  ────────────────────────────────────────────────────────────
+FONTANAR DEL RIO · CEFE - PISCINA OLIMP…  SUBA       06:00 (2) 07:00 (2) 08:00 (2) 09:00…  book idrd:17082 --date 2026-11-07 --hour 6 --lane 121
+FONTANAR DEL RIO · CEFE - PISCINA OLIMP…  SUBA       06:00 (11) 07:00 (11) 08:00 (11) 09…  book idrd:17082 --date 2026-11-07 --hour 6 --lane 122
+PARQUE DE LAS COMETAS · PISCINA SEMIOLI…  SUBA       06:00 (2) 08:00 (2) 09:00 (2)         book idrd:18181 --date 2026-11-07 --hour 6 --lane 100
+CEFE Chapinero · Piscina Recreativa Occ…  CHAPINERO  08:00 (20) 09:00 (20)                 book cefe:5ca25176-94e5-4956-a327-8117624acc4c --date 2026-…
+CEFE Chapinero · Piscina Semiolímpica     CHAPINERO  08:00 (30) 09:00 (30)                 book cefe:463e2980-59d9-4789-a6b1-7a0d035f561d --date 2026-…
+Entre paréntesis: cupos cuando el espacio es compartido. `cupo book` muestra una vista previa antes de reservar.
 
 Próximos pasos:
-  → idrd booking create 11537 --date 2026-11-06 --hour 16  vista previa de la reserva (no reserva nada)
+  → cupo book idrd:17082 --date 2026-11-07 --hour 6 --lane 121  vista previa de la reserva (no reserva nada)
 ```
 
-> **Proyecto no oficial.** No está afiliado ni respaldado por el IDRD. Usa tu propia cuenta. Las reservas del portal **no se pueden cancelar**, así que el CLI nunca reserva sin que lo confirmes de forma explícita.
+> **Proyecto no oficial.** No está afiliado al IDRD ni al CEFE Chapinero. Usas tu propia cuenta de cada sistema. Nunca reserva ni paga sin que lo confirmes de forma explícita.
 
 ---
 
 ## Contenido
 
-- [Requisitos](#requisitos)
-- [Instalación](#instalación)
-- [Primeros pasos](#primeros-pasos)
-- [Comandos](#comandos)
+- [El job](#el-job)
+- [Requisitos e instalación](#requisitos-e-instalación)
+- [Buscar](#buscar)
+- [Reservar](#reservar)
+- [Lo demás que cada sistema ofrece](#lo-demás-que-cada-sistema-ofrece)
 - [Cómo te protege al reservar](#cómo-te-protege-al-reservar)
 - [Para agentes de IA](#para-agentes-de-ia)
 - [Solución de problemas](#solución-de-problemas)
@@ -39,186 +40,96 @@ Próximos pasos:
 
 ---
 
-## Requisitos
+## El job
 
-- macOS o Linux
-- [Node.js](https://nodejs.org) 20 o superior. Revísalo con `node --version`.
-- Una cuenta del Portal Ciudadano, **solo para reservar**. Buscar canchas y horarios no requiere cuenta.
+Quieres nadar el sábado temprano, jugar tenis el viernes al salir del trabajo, o meter a tu hijo a un curso. Cada escenario público de Bogotá vive en un sistema distinto, con su propia cuenta, sus propias reglas y su propio formulario. `cupo` pone los tres pasos del job en tres comandos:
 
-No necesitas Bun ni compilar nada: el repo trae el ejecutable listo en `dist/`.
+| Paso | Comando | Qué hace |
+|---|---|---|
+| ¿Dónde hay cupo? | `cupo find` | Busca en todos los proveedores a la vez. Cada fila trae el comando exacto para reservarla. |
+| Resérvalo | `cupo book <id>` | Enruta al proveedor correcto por el id (`idrd:…` o `cefe:…`). Primero muestra una vista previa. |
+| ¿Qué cubre cada sistema? | `cupo providers` | Mapa de proveedores, deportes, y si ya tienes sesión. |
 
-## Instalación
+Todo lo específico de cada sistema sigue disponible bajo su prefijo: `cupo idrd …` y `cupo cefe …`.
 
-Copia y pega el bloque completo en tu terminal:
+## Requisitos e instalación
+
+- macOS o Linux, [Node.js](https://nodejs.org) 20 o superior (`node --version`).
+- Buscar no requiere cuenta. Para reservar: tu cuenta del Portal Ciudadano, tu cuenta del CEFE Chapinero, o ambas.
+- No necesitas Bun ni compilar: el repo trae el ejecutable listo en `dist/`.
 
 ```bash
-git clone https://github.com/huayaney-exe/portal-ciudadano-cli.git
-cd portal-ciudadano-cli
+git clone https://github.com/huayaney-exe/cupo.git
+cd cupo
 npm link
-idrd doctor
+cupo doctor
 ```
 
-`npm link` deja el comando `idrd` disponible en cualquier carpeta. `idrd doctor` confirma que todo está bien: versión de Node, conexión con el portal y estado de la sesión.
+`npm link` deja `cupo` disponible en cualquier carpeta (y `idrd`, el nombre anterior, como alias). `cupo doctor` revisa Node, la conexión con ambos proveedores y tus sesiones. Actualizar: `git pull` en la carpeta del repo. Desinstalar: `npm unlink -g cupo`.
 
-**Actualizar** a la última versión, desde la carpeta del repo:
+## Buscar
 
 ```bash
-git pull
+cupo find --sport pool --date sab --from 6 --to 10     # nadar el sábado temprano, en todos lados
+cupo find --sport tennis --date vie --from 16          # tenis el viernes en la tarde
+cupo find --sport grill --date dom                     # asador el domingo
+cupo find --sport pool --locality chapinero            # solo cerca de Chapinero
+cupo find --sport pool --provider idrd                 # solo el IDRD
 ```
 
-**Desinstalar:**
+- `--sport`: `tennis` `padel` `pickleball` `synthetic` `natural` `pool` `grill` `gym` `coliseum` (también en español: `piscina`, `asador`, `gimnasio`, `coliseo`). Default `pool`.
+- `--date`: `2026-11-07`, `hoy`, `mañana`, o `lun…dom` (próxima ocurrencia). Default mañana.
+- `--from` / `--to`: `6`, `6am`, `18`, `06:30`.
+- Entre paréntesis van los cupos cuando el espacio es compartido (piscinas, gimnasios). Las piscinas del IDRD se buscan carril por carril.
+
+## Reservar
 
 ```bash
-npm unlink -g idrd-cli
+cupo book idrd:11537 --date vie --hour 16                    # vista previa: checks en vivo, nada se reserva
+cupo book idrd:11537 --date vie --hour 16 --yes --confirm 11537@2026-11-06T16x1   # IDRD: irreversible, exige el intent
+cupo book cefe:463e2980-… --date sab --time 07:15            # vista previa
+cupo book cefe:463e2980-… --date sab --time 07:15 --yes      # CEFE: cancelable hasta 6 h antes
 ```
 
-## Primeros pasos
+La vista previa corre contra el sistema real: disponibilidad en ese momento, reglas del proveedor, tu sesión, el killswitch. Solo si todo está en verde te imprime el comando para ejecutar. Las diferencias entre proveedores están en la propia salida:
 
-### 1. Buscar horas libres
-
-En todas las canchas de tenis, un día y una franja horaria:
-
-```bash
-idrd find --date vie --from 6 --to 9
-```
-
-Otro deporte, o filtrando por localidad:
-
-```bash
-idrd find --sport padel --date sab
-idrd find --date mañana --locality usaquen
-```
-
-Una cancha en detalle, y su información (dirección, superficie, reglas):
-
-```bash
-idrd slot list 11537 --date mie --free
-idrd court get 11537
-```
-
-### 2. Iniciar sesión
-
-```bash
-idrd auth login --email tu@correo.com
-```
-
-Te pide la contraseña sin mostrarla en pantalla y **no la guarda**: solo se guarda el token de sesión, que dura 8 horas y se renueva solo.
-
-### 3. Reservar
-
-Primero la **vista previa**, que no reserva nada:
-
-```bash
-idrd booking create 11537 --date vie --hour 16
-```
-
-La vista previa verifica en vivo que el horario siga libre, que cumpla las reglas del portal y que tu sesión sea válida. Al final te muestra el comando exacto para reservar de verdad, con un código de confirmación como este:
-
-```bash
-idrd booking create 11537 --date vie --hour 16 --yes --confirm 11537@2026-11-06T16x1
-```
-
-- Si la reserva es **gratis**, queda confirmada y recibes el link del comprobante.
-- Si **cobra**, elige tu banco y genera el link de pago PSE. El pago lo haces tú en tu banco:
-
-```bash
-idrd pay banks
-idrd pay pse <id-de-la-reserva> --bank 1007 --yes
-```
-
-## Comandos
-
-Tipos de espacio (`--sport`): `tennis`, `padel`, `pickleball`, `synthetic`, `natural`, `pool`, `grill`, `gym`, `coliseum` (también en español: `piscina`, `asador`, `gimnasio`, `coliseo`).
-
-| Comando | Qué hace | ¿Cuenta? |
+| | IDRD | CEFE Chapinero |
 |---|---|---|
-| `idrd find` | Busca horas libres en todos los espacios de un tipo (piscinas: carril por carril, con cupos) | No |
-| `idrd slot list <id>` | Horas de un espacio en una fecha: libres, reservadas, cupos o bloques | No |
-| `idrd court list` | Lista los espacios reservables de un tipo (lee todas las páginas del portal) | No |
-| `idrd court get <id>` | Tipo, dirección, horario del parque, superficie, reglas; carriles o deportes | No |
-| `idrd court lanes <piscina>` / `court sports <coliseo>` | Carriles de una piscina / deportes de un coliseo | No |
-| `idrd auth login` / `status` / `logout` | Iniciar sesión, ver el estado, cerrar sesión | — |
-| `idrd booking create <id>` | Vista previa de la reserva, o reserva real con `--yes --confirm` (`--lane` piscinas, `--sport-id` coliseos, `--document` y `--adult-*` para CEFE) | Sí |
-| `idrd booking list` | Tus reservas | Sí |
-| `idrd pay banks` / `pay pse <reserva>` / `pay status <código>` | Bancos PSE, link de pago, estado de un pago | No / Sí / Sí |
-| `idrd pay pending` / `pay history` | Pagos pendientes e historial de tu cuenta | Sí |
-| `idrd gym status` / `quote` / `availability` / `active` | Mensualidad de un gimnasio CEFE: estado, precio y vigencia, cupos | Sí |
-| `idrd gym buy <gimnasio>` / `gym activate` | Compra la mensualidad (vista previa, luego `--yes --confirm`) y la activa tras pagar | Sí |
-| `idrd activity list` | Escuelas y programas con inscripción; filtros por programa, sede, texto, edad, costo y cupos | No |
-| `idrd activity get` / `programs` / `stages` / `categories` | Detalle, programas, sedes (los CEFE son sedes), categorías | No |
-| `idrd profile list` / `activity mine` | Perfiles de tu cuenta (titular y beneficiarios) e inscripciones | Sí |
-| `idrd activity subscribe <actividad> --person <perfil>` / `unsubscribe` | Inscribe un perfil (vista previa, luego `--yes --confirm`) o retira la inscripción | Sí |
-| `idrd doctor` | Diagnóstico del entorno y la conexión | No |
-| `idrd killswitch on` / `off` | Bloquea o desbloquea toda escritura (reservas, pagos, inscripciones) | No |
-| `idrd schema` | Contrato completo en JSON, para agentes | No |
+| Sesión | `cupo idrd auth login` (`IDRD_PASSWORD`) | `cupo cefe auth login` (`CEFE_PASSWORD`) |
+| Unidad | horas en punto; piscinas por carril (`--lane`); coliseos por deporte (`--sport-id`); asadores por bloque | franjas de 60 min publicadas por la piscina (`--time 07:15`) |
+| Reglas | máx. 2 h, 24 h de anticipación, semana publicada | una reserva por día, perfil completo (teléfono, estrato, nacimiento) |
+| Cancelar | **no existe**: por eso exige `--yes --confirm <intent>` | hasta 6 h antes: `cupo cefe booking cancel <id> --yes` |
+| Pagar | link PSE con `cupo idrd pay pse`; gratis se confirma solo | `--pay efectivo` (en la sede), `--pay wompi` (en la web), `--pay creditos`; 10.000 COP por persona desde el 5-nov-2026 |
 
-Ayuda de cualquier comando: `idrd <comando> --help`.
+## Lo demás que cada sistema ofrece
 
-```bash
-idrd find --sport piscina --date sab --from 6 --to 10   # cupos en todas las piscinas, carril por carril
-idrd find --sport asador --date dom                     # asadores libres (bloque de día completo)
-idrd slot list 16893 --lane 3 --date sab                # piscina CEFE San Cristóbal, carril 3
-idrd slot list 16892 --sport-id 3 --date sab            # coliseo, baloncesto
-idrd activity list --available --age 8 --free           # escuelas con cupo para un niño de 8 años
-idrd activity list --stage 3                            # actividades del CEFE San Cristóbal
-```
+`cupo providers` lo resume; `cupo idrd --help` y `cupo cefe --help` lo listan completo.
 
-**Opciones frecuentes**
+**IDRD** (`cupo idrd …`): `court list|get|lanes|sports`, `slot list|find`, `booking create|list`, `pay banks|pse|status|pending|history`, `gym status|quote|availability|active|buy|activate` (mensualidad de gimnasio CEFE), `activity list|get|programs|stages|categories|mine|subscribe|unsubscribe` (escuelas y programas), `profile list`. Cobertura verificada el 3-nov-2026: 320 canchas, 12 piscinas, 35 asadores, 5 gimnasios, 4 coliseos, 74 actividades en 45 sedes.
 
-| Opción | Ejemplos | Default |
-|---|---|---|
-| `--date` | `2026-11-06`, `hoy`, `mañana`, `lun`, `mar`, `mie`, `jue`, `vie`, `sab`, `dom` | hoy (en `find`, mañana) |
-| `--hour`, `--from`, `--to` | `6`, `6am`, `"6:00 AM"`, `18`, `6pm` | todo el día |
-| `--sport` | `tennis`, `padel`, `pickleball`, `synthetic`, `natural`, `pool`, `grill`, `gym`, `coliseum` | `tennis` |
-| `--hours` | canchas: `1` o `2`; otros espacios: dentro del bloque publicado; asadores: el bloque completo | `1` |
-| `--lane` / `--sport-id` | piscinas: carril (`court lanes`); coliseos: deporte (`court sports`) | — |
-
-Los nombres de día apuntan a la **próxima** ocurrencia, contando hoy. Todas las horas son de Bogotá.
-
-Cobertura del portal (3 nov 2026, en vivo): 320 canchas, 12 piscinas, 35 asadores, 5 gimnasios, 4 coliseos; 74 actividades en 45 sedes y 29 programas.
-
-## CEFE Chapinero
-
-El Centro Felicidad Chapinero no está en el portal del IDRD: tiene su propia plataforma ([cefechapinero.com](https://cefechapinero.com)) y su propia cuenta. El mismo `idrd` la cubre bajo `idrd cefe …`:
-
-```bash
-idrd cefe pool list                                   # piscinas, capacidad y horario
-idrd cefe find --date sab --from 06:00 --to 10:00     # cupos libres en todas las piscinas
-idrd cefe slot list semiolimpica --date mañana --free # cupos por franja (60 min) de una piscina
-idrd cefe course list --available                     # cursos y actividades con precio por estrato
-idrd cefe course get 74536a5b                         # detalle y clases con cupo
-
-idrd cefe auth login --email tu@correo.com            # CEFE_PASSWORD o --password-stdin para agentes
-idrd cefe me                                          # perfil, créditos, dependientes, qué falta para reservar
-idrd cefe booking create semiolimpica --date sab --time 07:15 --dependent 1   # vista previa; --yes reserva
-idrd cefe booking list --upcoming · idrd cefe booking cancel <id> --yes       # cancelable hasta 6 h antes
-idrd cefe course enroll <curso> --yes · idrd cefe class book <curso> --date jue --yes
-idrd cefe tournament list · idrd cefe tournament register <t> --competition <c> --yes
-```
-
-Pago: `--pay efectivo` (en la sede, default), `--pay wompi` (la reserva queda pendiente y el pago se completa en la web) o `--pay creditos`. Desde el 5 de noviembre de 2026 la práctica libre cuesta 10.000 COP por persona y hora; antes es gratis. Una reserva por día por cuenta. Las inscripciones a cursos y clases están deshabilitadas en la web desde julio de 2026; el CLI lo muestra como check en rojo.
+**CEFE Chapinero** (`cupo cefe …`): `pool list|get`, `slot list|find`, `booking create|list|cancel`, `course list|get|mine|enroll`, `class book|cancel`, `tournament list|get|mine|register|unregister`, `promo list`, `auth login|status|logout|register`, `me`. Las inscripciones a cursos y clases están deshabilitadas en la web desde julio de 2026; el CLI lo muestra como check en rojo.
 
 ## Cómo te protege al reservar
 
 1. **Vista previa por defecto.** Sin `--yes`, `booking create` solo muestra lo que haría.
 2. **Confirmación doble.** Para reservar de verdad necesitas `--yes` **y** `--confirm <código>`. El código lo imprime la vista previa e incluye cancha, fecha, hora y duración, así que no se puede reservar algo distinto por error.
 3. **Revisión en vivo justo antes de reservar.** Se verifica que el horario siga libre, las reglas del portal (máximo 2 horas seguidas, 24 horas de anticipación, solo la semana publicada) y tu sesión.
-4. **Registro antes de actuar.** Cada reserva o pago deja un registro en `~/.idrd/audit/` *antes* de llamar al portal.
-5. **Killswitch.** `idrd killswitch on` bloquea cualquier reserva o pago, sin importar las opciones que se pasen.
+4. **Registro antes de actuar.** Cada reserva o pago deja un registro en `~/.cupo/audit/` *antes* de llamar al portal.
+5. **Killswitch.** `cupo killswitch on` bloquea cualquier reserva o pago, sin importar las opciones que se pasen.
 6. **El pago es tuyo.** El CLI nunca toca tarjetas ni claves del banco. Para reservas pagas solo te entrega el link de PSE.
 
 Reglas del portal que conviene saber: la semana se publica los **lunes a las 9:00 a.m.**, se reserva con **24 horas** de anticipación como mínimo, se permiten **máximo 2 horas por día y 4 por semana**, y **no hay devolución** por inasistencia.
-
 ## Para agentes de IA
 
-- Si stdout no es una terminal, la salida es **JSON automático**, o con `--json`. Es un objeto por ejecución:
+Empieza por `cupo schema`: trae `start` (los tres comandos del job), `providers` y cada comando con su `provider`. Luego `cupo providers` para saber dónde hay sesión.
+
+- Si stdout no es una terminal, la salida es **JSON automático**, o con `--json`. Un objeto por ejecución:
   - éxito: `{ok: true, schemaVersion, command, data, nextSteps[]}`
   - error: `{ok: false, error: {code, message, hint}}`
-- `idrd schema` devuelve el contrato completo y versionado.
-- Códigos de salida: `0` ok · `2` uso o regla · `3` falta sesión · `4` no existe · `5` rechazado (falta confirmación, killswitch, horario ocupado) · `6` portal o red.
-- Nunca se queda esperando una respuesta: si falta algo, falla con un error estructurado.
-- Login sin terminal: variable `IDRD_PASSWORD` u opción `--password-stdin`.
-- Manual para agentes: [`skills/idrd/SKILL.md`](skills/idrd/SKILL.md). Instálalo con `npx skills add huayaney-exe/portal-ciudadano-cli`.
+- `nextSteps` siempre son comandos reales y ejecutables; en `cupo find`, cada resultado trae su `bookCommand`.
+- Códigos de salida: `0` ok · `2` uso o regla · `3` falta sesión · `4` no existe · `5` rechazado (falta confirmación, killswitch, sin cupo) · `6` proveedor o red.
+- Nunca se queda esperando: si falta algo, falla con un error estructurado. Contraseñas sin terminal: `IDRD_PASSWORD`, `CEFE_PASSWORD` o `--password-stdin`.
+- Manual para agentes: [`skills/cupo/SKILL.md`](skills/cupo/SKILL.md). Instálalo con `npx skills add huayaney-exe/cupo`.
 
 ## Solución de problemas
 
@@ -235,17 +146,17 @@ Instala Node 20 o superior desde [nodejs.org](https://nodejs.org), o con `brew i
 El correo o la contraseña no coinciden con tu cuenta del portal. Pruébalos directamente en [portalciudadano.idrd.gov.co](https://portalciudadano.idrd.gov.co).
 
 **`auth/web-client` o `upstream/web-client`.**
-El portal cambió su configuración de login. Borra `~/.idrd/web-client.json` y vuelve a intentar. Si sigue fallando, abre un issue.
+El portal cambió su configuración de login. Borra `~/.cupo/web-client.json` y vuelve a intentar. Si sigue fallando, abre un issue.
 
 **`rule/violation` o `slot/unavailable` al reservar.**
-El horario no cumple una regla del portal o ya lo tomó otra persona. El mensaje dice cuál fue el problema. Corre `idrd slot list <cancha> --date <día> --free` para ver alternativas.
+El horario no cumple una regla del portal o ya lo tomó otra persona. El mensaje dice cuál fue el problema. Corre `cupo cupo idrd slot list <cancha> --date <día> --free` para ver alternativas.
 
 **Cualquier otro error.**
-`idrd doctor` muestra qué está fallando. Si agregas `DEBUG=1` antes del comando, verás el detalle técnico.
+`cupo doctor` muestra qué está fallando. Si agregas `DEBUG=1` antes del comando, verás el detalle técnico.
 
 ## Privacidad y archivos locales
 
-Todo queda en tu equipo, en `~/.idrd/` (puedes cambiar la ubicación con `IDRD_HOME`):
+Todo queda en tu equipo, en `~/.cupo/` (puedes cambiar la ubicación con `CUPO_HOME`):
 
 | Archivo | Contenido |
 |---|---|
@@ -257,8 +168,9 @@ Todo queda en tu equipo, en `~/.idrd/` (puedes cambiar la ubicación con `IDRD_H
 | `KILLSWITCH` | Si existe, toda escritura queda bloqueada |
 
 Tu contraseña **nunca** se guarda en disco. El CLI no envía datos a ningún servicio distinto del portal del IDRD, salvo una consulta a `api.ipify.org` para obtener tu IP pública, que la pasarela PSE exige al generar un pago.
-
 ## Estado del proyecto
+
+Qué está verificado contra los sistemas reales y qué no.
 
 | Parte | Estado |
 |---|---|
@@ -273,8 +185,7 @@ Tu contraseña **nunca** se guarda en disco. El CLI no envía datos a ningún se
 | CEFE Chapinero: sesión, reservas, inscripciones, clases, torneos | 🟡 Desde el código de la web, sin ejecutar en vivo |
 | Pago por Daviplata, calendario de recreación, programas sociales, pago Wompi desde el CLI | ❌ Fuera de alcance |
 
-Si haces la primera reserva real, tu respuesta queda guardada en `~/.idrd/bookings/`. Si algo no coincide con lo esperado, el error muestra el mensaje del portal.
-
+Si haces la primera reserva real, tu respuesta queda guardada en `~/.cupo/bookings/`. Si algo no coincide con lo esperado, el error muestra el mensaje del portal.
 ## Desarrollo
 
 Para modificar el código necesitas [Bun](https://bun.sh):
@@ -284,7 +195,7 @@ bun install
 bun run check
 ```
 
-`bun run check` corre el typecheck, las 66 pruebas y el build. Después de cambiar algo en `src/`, ejecuta `bun run build` y haz commit también de `dist/idrd.js`: es lo que usa quien instala sin Bun.
+`bun run check` corre el typecheck, las 66 pruebas y el build. Después de cambiar algo en `src/`, ejecuta `bun run build` y haz commit también de `dist/cupo.js`: es lo que usa quien instala sin Bun.
 
 Para probar sin instalar:
 

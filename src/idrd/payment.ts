@@ -61,7 +61,7 @@ export function loadBooking(profile: string | undefined, bookingId: string): Boo
   try {
     return JSON.parse(readFileSync(join(paths.bookings(profile), `${bookingId}.json`), "utf8")) as BookingRecord;
   } catch {
-    return fail("not-found/booking", `No tengo registrada la reserva ${bookingId} en este equipo.`, "Solo se puede pagar una reserva creada con `idrd booking create`.");
+    return fail("not-found/booking", `No tengo registrada la reserva ${bookingId} en este equipo.`, "Solo se puede pagar una reserva creada con `cupo idrd booking create`.");
   }
 }
 

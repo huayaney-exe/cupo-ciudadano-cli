@@ -24,7 +24,7 @@ function ids(ctx: Ctx, key: string): number[] | undefined {
 
 function activityId(raw: string): number {
   const n = Number(raw);
-  if (!Number.isInteger(n) || n <= 0) fail("usage/bad-id", `Id de actividad inválido: ${raw}.`, "Usa el id de `idrd activity list`.");
+  if (!Number.isInteger(n) || n <= 0) fail("usage/bad-id", `Id de actividad inválido: ${raw}.`, "Usa el id de `cupo idrd activity list`.");
   return n;
 }
 
@@ -66,10 +66,10 @@ export async function activityList(ctx: Ctx) {
           )}`,
     nextSteps: first
       ? [
-          { command: `idrd activity get ${first.id}`, description: "detalle, consentimientos y reglamento" },
-          { command: `idrd activity subscribe ${first.id} --person <profileId>`, description: "vista previa de la inscripción" },
+          { command: `cupo idrd activity get ${first.id}`, description: "detalle, consentimientos y reglamento" },
+          { command: `cupo idrd activity subscribe ${first.id} --person <profileId>`, description: "vista previa de la inscripción" },
         ]
-      : [{ command: "idrd activity programs", description: "ver programas con cupos" }],
+      : [{ command: "cupo idrd activity programs", description: "ver programas con cupos" }],
   };
 }
 
@@ -89,7 +89,7 @@ export async function activityGet(ctx: Ctx) {
         a.consent.length ? dim(`  ${a.consent.length} consentimiento(s) por aceptar (ver --json)`) : "",
         a.regulations.length ? dim(`  ${a.regulations.length} reglamento(s) (ver --json)`) : "",
       ].filter(Boolean).join("\n"),
-    nextSteps: [{ command: `idrd activity subscribe ${id} --person <profileId>`, description: "vista previa de la inscripción" }],
+    nextSteps: [{ command: `cupo idrd activity subscribe ${id} --person <profileId>`, description: "vista previa de la inscripción" }],
   };
 }
 
@@ -98,7 +98,7 @@ export async function activityPrograms() {
   return {
     data: rows,
     human: () => rows.map((r) => `  ${strong(String(r.id).padEnd(4))} ${r.name}${r.count ? muted(`  (${r.count})`) : ""}`).join("\n"),
-    nextSteps: [{ command: `idrd activity list --program ${rows.find((r) => (r.count ?? 0) > 0)?.id ?? rows[0]?.id ?? 1}`, description: "actividades de un programa" }],
+    nextSteps: [{ command: `cupo idrd activity list --program ${rows.find((r) => (r.count ?? 0) > 0)?.id ?? rows[0]?.id ?? 1}`, description: "actividades de un programa" }],
   };
 }
 
@@ -107,7 +107,7 @@ export async function activityStages() {
   return {
     data: rows,
     human: () => rows.map((r) => `  ${strong(String(r.id).padEnd(4))} ${r.name}${r.parkName ? muted(` · ${r.parkName}`) : ""}${r.count ? muted(`  (${r.count})`) : ""}`).join("\n"),
-    nextSteps: [{ command: `idrd activity list --stage ${rows[0]?.id ?? 1}`, description: "actividades de un escenario" }],
+    nextSteps: [{ command: `cupo idrd activity list --stage ${rows[0]?.id ?? 1}`, description: "actividades de un escenario" }],
   };
 }
 
@@ -145,7 +145,7 @@ function profileIdOf(p: Record<string, unknown>): number {
 export async function activitySubscribe(ctx: Ctx) {
   const id = activityId(positional(ctx.args, 0, "id"));
   const profileId = Number(requireStr(ctx.args, "person", "--person"));
-  if (!Number.isInteger(profileId) || profileId <= 0) fail("usage/bad-arg", "--person debe ser el id numérico de `idrd profile list`.");
+  if (!Number.isInteger(profileId) || profileId <= 0) fail("usage/bad-arg", "--person debe ser el id numérico de `cupo idrd profile list`.");
   const live = ctx.args.yes === true && !ctx.flags.dryRun;
   const intent = `activity${id}@profile${profileId}`;
   const { token } = await accessToken(ctx.flags.profile);
@@ -179,17 +179,17 @@ export async function activitySubscribe(ctx: Ctx) {
           ...checks.map((c) => `${c.ok ? ok("✓") : danger("✗")} ${c.name.padEnd(14)} ${muted(c.detail)}`),
           "",
           a.consent.length ? warn(`! Al confirmar aceptas ${a.consent.length} consentimiento(s) y los términos del IDRD.`) : "",
-          ready ? `${dim("Para inscribir de verdad:")}\n  idrd activity subscribe ${id} --person ${profileId} --yes --confirm ${strong(intent)}` : danger("No se puede inscribir mientras haya checks en rojo."),
+          ready ? `${dim("Para inscribir de verdad:")}\n  cupo idrd activity subscribe ${id} --person ${profileId} --yes --confirm ${strong(intent)}` : danger("No se puede inscribir mientras haya checks en rojo."),
         ].filter(Boolean).join("\n"),
-      nextSteps: ready ? [{ command: `idrd activity subscribe ${id} --person ${profileId} --yes --confirm ${intent}`, description: "INSCRIPCIÓN REAL (se puede deshacer con activity unsubscribe)" }] : [],
+      nextSteps: ready ? [{ command: `cupo idrd activity subscribe ${id} --person ${profileId} --yes --confirm ${intent}`, description: "INSCRIPCIÓN REAL (se puede deshacer con activity unsubscribe)" }] : [],
     };
   }
 
-  if (k.active) fail("safety/killswitch", "Killswitch activo: escrituras bloqueadas.", "Desactívalo con `idrd killswitch off`.");
+  if (k.active) fail("safety/killswitch", "Killswitch activo: escrituras bloqueadas.", "Desactívalo con `cupo killswitch off`.");
   const failed = checks.find((c) => !c.ok);
   if (failed) fail("safety/precheck", `No inscribo: ${failed.name} — ${failed.detail}`);
   await approveGate(
-    { cliName: "idrd", flags: { json: ctx.flags.json, noInput: ctx.flags.noInput } },
+    { cliName: "cupo", flags: { json: ctx.flags.json, noInput: ctx.flags.noInput } },
     { title: "Inscripción", summary },
     { trust: "T3", yes: true, confirm: str(ctx.args, "confirm"), confirmAgainst: intent },
   );
@@ -199,8 +199,8 @@ export async function activitySubscribe(ctx: Ctx) {
     au.complete({ details: res.details });
     return {
       data: { activityId: id, profileId, message: res.message, subscriptionId: res.details },
-      human: () => `${ok("✓")} ${res.message || "Preinscripción registrada."}${res.details ? ` ${muted(`(#${String(res.details)})`)}` : ""}\n  ${dim("Revisa tu correo o `idrd activity mine` para el estado.")}`,
-      nextSteps: [{ command: "idrd activity mine", description: "ver estado de la inscripción" }],
+      human: () => `${ok("✓")} ${res.message || "Preinscripción registrada."}${res.details ? ` ${muted(`(#${String(res.details)})`)}` : ""}\n  ${dim("Revisa tu correo o `cupo idrd activity mine` para el estado.")}`,
+      nextSteps: [{ command: "cupo idrd activity mine", description: "ver estado de la inscripción" }],
     };
   } catch (e) {
     au.fail({ error: e instanceof AppError ? e.code : String(e) });
@@ -211,8 +211,8 @@ export async function activitySubscribe(ctx: Ctx) {
 export async function activityUnsubscribe(ctx: Ctx) {
   const subId = positional(ctx.args, 0, "subscriptionId");
   const { token } = await accessToken(ctx.flags.profile);
-  if (getKillswitchState(appHome()).active) fail("safety/killswitch", "Killswitch activo: escrituras bloqueadas.", "Desactívalo con `idrd killswitch off`.");
-  await approveGate({ cliName: "idrd", flags: { json: ctx.flags.json, noInput: ctx.flags.noInput } }, { title: "Desinscribir", summary: `inscripción ${subId}` }, { trust: "T2", yes: ctx.args.yes === true });
+  if (getKillswitchState(appHome()).active) fail("safety/killswitch", "Killswitch activo: escrituras bloqueadas.", "Desactívalo con `cupo killswitch off`.");
+  await approveGate({ cliName: "cupo", flags: { json: ctx.flags.json, noInput: ctx.flags.noInput } }, { title: "Desinscribir", summary: `inscripción ${subId}` }, { trust: "T2", yes: ctx.args.yes === true });
   const au = beginAudit(paths.audit(), { kind: "activity.unsubscribe", command: "activity unsubscribe", tier: "T2", profile: profileName(ctx.flags.profile), meta: { subscriptionId: subId } });
   try {
     await unsubscribe(token, subId);

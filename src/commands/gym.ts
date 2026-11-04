@@ -41,8 +41,8 @@ export async function gymStatus(ctx: Ctx) {
         ? `${ok("●")} Mensualidad activa en el gimnasio ${bold(String(id))}${st.ends_at ? ` hasta ${st.ends_at}` : ""}${reservations ? `\n  ${muted(`Reservas con la mensualidad: ${Array.isArray(reservations.items) ? reservations.items.length : "?"} · cambios esta semana: ${String(reservations.changes_this_week ?? 0)}`)}` : ""}`
         : `${warn("○")} Sin mensualidad activa en el gimnasio ${bold(String(id))}.`,
     nextSteps: active
-      ? [{ command: `idrd gym availability ${id}`, description: "cupos por día para usar la mensualidad" }]
-      : [{ command: `idrd gym quote ${id}`, description: "cuánto cuesta y qué vigencia tendría" }],
+      ? [{ command: `cupo idrd gym availability ${id}`, description: "cupos por día para usar la mensualidad" }]
+      : [{ command: `cupo idrd gym quote ${id}`, description: "cuánto cuesta y qué vigencia tendría" }],
   };
 }
 
@@ -60,7 +60,7 @@ export async function gymQuote(ctx: Ctx) {
         `${muted("Vigencia")}  ${data.validFrom ?? "?"} → ${data.validTo ?? "?"}`,
         data.concept ? `${muted("Concepto")}  ${String(data.concept)}` : "",
       ].filter(Boolean).join("\n"),
-    nextSteps: [{ command: `idrd gym buy ${id} --bank <código>`, description: "vista previa de la compra (no cobra nada)" }],
+    nextSteps: [{ command: `cupo idrd gym buy ${id} --bank <código>`, description: "vista previa de la compra (no cobra nada)" }],
   };
 }
 
@@ -103,7 +103,7 @@ export async function gymBuy(ctx: Ctx) {
     { name: "killswitch", ok: !k.active, detail: k.active ? `activo: ${k.reason}` : "apagado" },
     { name: "sesion", ok: u.hasProfile, detail: u.hasProfile ? u.email : `${u.email}: completa tu perfil en el portal` },
     { name: "mensualidad", ok: !status.active, detail: status.active ? `ya tienes una activa hasta ${String(status.ends_at ?? "?")}` : "sin mensualidad activa" },
-    { name: "banco", ok: amount === 0 || Boolean(bank), detail: amount === 0 ? "gratis, no hace falta banco" : bank ? `PSE banco ${bank}` : "falta --bank <código> (idrd pay banks)" },
+    { name: "banco", ok: amount === 0 || Boolean(bank), detail: amount === 0 ? "gratis, no hace falta banco" : bank ? `PSE banco ${bank}` : "falta --bank <código> (cupo idrd pay banks)" },
   ];
   const ready = checks.every((c) => c.ok);
   const summary = `Mensualidad gimnasio ${id} · ${cop(amount)} · ${String(quote.valid_from ?? "?")} → ${String(quote.valid_to ?? "?")}`;
@@ -119,17 +119,17 @@ export async function gymBuy(ctx: Ctx) {
           "",
           ...checks.map((c) => `${c.ok ? ok("✓") : danger("✗")} ${c.name.padEnd(13)} ${muted(c.detail)}`),
           "",
-          ready ? `${dim("Para comprar de verdad:")}\n  idrd gym buy ${id}${bank ? ` --bank ${bank}` : ""} --yes --confirm ${strong(intent)}` : danger("No se puede comprar mientras haya checks en rojo."),
+          ready ? `${dim("Para comprar de verdad:")}\n  cupo idrd gym buy ${id}${bank ? ` --bank ${bank}` : ""} --yes --confirm ${strong(intent)}` : danger("No se puede comprar mientras haya checks en rojo."),
         ].join("\n"),
-      nextSteps: ready ? [{ command: `idrd gym buy ${id}${bank ? ` --bank ${bank}` : ""} --yes --confirm ${intent}`, description: "COMPRA REAL: crea la mensualidad y el link de pago" }] : [],
+      nextSteps: ready ? [{ command: `cupo idrd gym buy ${id}${bank ? ` --bank ${bank}` : ""} --yes --confirm ${intent}`, description: "COMPRA REAL: crea la mensualidad y el link de pago" }] : [],
     };
   }
 
-  if (k.active) fail("safety/killswitch", "Killswitch activo: escrituras bloqueadas.", "Desactívalo con `idrd killswitch off`.");
+  if (k.active) fail("safety/killswitch", "Killswitch activo: escrituras bloqueadas.", "Desactívalo con `cupo killswitch off`.");
   const failed = checks.find((c) => !c.ok);
   if (failed) fail("safety/precheck", `No compro: ${failed.name} — ${failed.detail}`);
   await approveGate(
-    { cliName: "idrd", flags: { json: ctx.flags.json, noInput: ctx.flags.noInput } },
+    { cliName: "cupo", flags: { json: ctx.flags.json, noInput: ctx.flags.noInput } },
     { title: "Compra de mensualidad", summary },
     { trust: "T3", yes: true, confirm: str(ctx.args, "confirm"), confirmAgainst: intent },
   );
@@ -163,12 +163,12 @@ export async function gymBuy(ctx: Ctx) {
         `${ok("✓")} Mensualidad creada${membershipId ? `: ${bold(membershipId)}` : ""} · ${summary}`,
         payment?.bankUrl ? `  ${bold("Link de pago PSE:")} ${String(payment.bankUrl)}` : "",
         payment && payment.ok === false ? danger(`  ✗ La mensualidad existe pero falló el pago: ${(payment.error as { message: string }).message}`) : "",
-        payment?.paymentCode ? dim(`  Cuando pagues: idrd gym activate ${id} --code ${String(payment.paymentCode)}`) : "",
+        payment?.paymentCode ? dim(`  Cuando pagues: cupo idrd gym activate ${id} --code ${String(payment.paymentCode)}`) : "",
       ].filter(Boolean).join("\n"),
     nextSteps: payment?.paymentCode
       ? [
-          { command: `idrd pay status ${String(payment.paymentCode)}`, description: "ver si el pago quedó aprobado" },
-          { command: `idrd gym activate ${id} --code ${String(payment.paymentCode)}`, description: "activar la mensualidad con el pago aprobado" },
+          { command: `cupo idrd pay status ${String(payment.paymentCode)}`, description: "ver si el pago quedó aprobado" },
+          { command: `cupo idrd gym activate ${id} --code ${String(payment.paymentCode)}`, description: "activar la mensualidad con el pago aprobado" },
         ]
       : [],
   };
@@ -179,7 +179,7 @@ export async function gymActivate(ctx: Ctx) {
   const id = courtId(positional(ctx.args, 0, "id"));
   const code = requireStr(ctx.args, "code");
   const { token } = await accessToken(ctx.flags.profile);
-  await approveGate({ cliName: "idrd", flags: { json: ctx.flags.json, noInput: ctx.flags.noInput } }, { title: "Activar mensualidad", summary: `gimnasio ${id} · pago ${code}` }, { trust: "T2", yes: ctx.args.yes === true });
+  await approveGate({ cliName: "cupo", flags: { json: ctx.flags.json, noInput: ctx.flags.noInput } }, { title: "Activar mensualidad", summary: `gimnasio ${id} · pago ${code}` }, { trust: "T2", yes: ctx.args.yes === true });
   const a = beginAudit(paths.audit(), { kind: "gym.membership.activate", command: "gym activate", tier: "T2", profile: profileName(ctx.flags.profile), meta: { gymId: id, code } });
   try {
     await gymMembershipPurchase(token, id, { payment_code: code });
@@ -192,6 +192,6 @@ export async function gymActivate(ctx: Ctx) {
   return {
     data: { gymId: id, active: Boolean(st.active), status: st },
     human: () => (st.active ? `${ok("✓")} Mensualidad activada${st.ends_at ? ` hasta ${String(st.ends_at)}` : ""}.` : `${warn("!")} El portal aceptó el código pero aún no reporta la mensualidad activa.`),
-    nextSteps: [{ command: `idrd gym status ${id}`, description: "confirmar estado" }],
+    nextSteps: [{ command: `cupo idrd gym status ${id}`, description: "confirmar estado" }],
   };
 }

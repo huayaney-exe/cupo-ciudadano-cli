@@ -1,11 +1,12 @@
 {
-  "name": "idrd-cli",
-  "version": "0.2.0",
-  "description": "Unofficial agent-first CLI for Bogotá's IDRD Portal Ciudadano (park courts: availability, booking, PSE payment link).",
+  "name": "cupo",
+  "version": "0.3.0",
+  "description": "Consigue cupo para hacer deporte en Bogotá desde la terminal: canchas, piscinas, asadores, gimnasios, coliseos y cursos del IDRD y del CEFE Chapinero. CLI agent-first, no oficial.",
   "type": "module",
   "private": true,
   "bin": {
-    "idrd": "dist/idrd.js"
+    "cupo": "dist/cupo.js",
+    "idrd": "dist/cupo.js"
   },
   "files": [
     "dist"
@@ -14,12 +15,12 @@
     "node": ">=20"
   },
   "scripts": {
-    "build": "bun build src/bin.ts --target=node --format=esm --outfile=dist/idrd.js && node scripts/shebang.mjs",
+    "build": "bun build src/bin.ts --target=node --format=esm --outfile=dist/cupo.js && node scripts/shebang.mjs",
     "dev": "bun src/bin.ts",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
     "check": "bun run typecheck && bun test && bun run build",
-    "verify:dist": "bun run build && git diff --quiet -- dist/ || (echo \"dist/idrd.js no coincide con src/: haz commit del build\" && exit 1)"
+    "verify:dist": "bun run build && git diff --quiet -- dist/ || (echo \"dist/cupo.js no coincide con src/: haz commit del build\" && exit 1)"
   },
   "license": "MIT",
   "devDependencies": {
@@ -33,15 +34,18 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/huayaney-exe/portal-ciudadano-cli.git"
+    "url": "git+https://github.com/huayaney-exe/cupo.git"
   },
-  "homepage": "https://github.com/huayaney-exe/portal-ciudadano-cli#readme",
+  "homepage": "https://github.com/huayaney-exe/cupo#readme",
   "keywords": [
-    "idrd",
+    "cupo",
     "bogota",
+    "idrd",
+    "cefe",
     "cli",
     "agent",
-    "tennis",
-    "booking"
+    "piscina",
+    "tenis",
+    "reservas"
   ]
 }

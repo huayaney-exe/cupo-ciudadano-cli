@@ -21,7 +21,7 @@ const dayEs = (d: string) => DAY_ES[d.toLowerCase()] ?? d.slice(0, 3);
 
 function assertWritable(): void {
   const k = getKillswitchState(appHome());
-  if (k.active) fail("safety/killswitch", `Killswitch activo${k.reason ? ` (${k.reason})` : ""}: escrituras bloqueadas.`, "Desactívalo con `idrd killswitch off`.");
+  if (k.active) fail("safety/killswitch", `Killswitch activo${k.reason ? ` (${k.reason})` : ""}: escrituras bloqueadas.`, "Desactívalo con `cupo killswitch off`.");
 }
 function audit(ctx: Ctx, kind: string, command: string, tier: string, meta: Record<string, unknown>) {
   return beginAudit(paths.audit(), { kind, command, tier, profile: profileName(ctx.flags.profile), meta });
@@ -54,7 +54,7 @@ export async function cefeLogin(ctx: Ctx) {
   return {
     data: { email, expiresAt: s.expiresAt, user: { ...s.user, raw: undefined }, missingForBooking: missing },
     human: () => `${ok("✓")} Sesión CEFE Chapinero iniciada como ${bold(email)} (${s.user.name})\n  ${muted(`Créditos: ${s.user.credits} · Reservas disponibles: ${s.user.reservasDisponibles} · Dependientes: ${s.user.dependents.length}`)}${missing.length ? `\n  ${warn("!")} Para reservar falta en tu perfil: ${missing.join(", ")} (cefechapinero.com/client/profile)` : ""}`,
-    nextSteps: [{ command: "idrd cefe find --date mañana", description: "cupos libres en las piscinas" }],
+    nextSteps: [{ command: "cupo cefe find --date mañana", description: "cupos libres en las piscinas" }],
   };
 }
 
@@ -68,7 +68,7 @@ function profileGaps(u: api.CefeUser): string[] {
 
 export async function cefeStatus(ctx: Ctx) {
   const s = currentSession(ctx.flags.profile);
-  if (!s) return { data: { loggedIn: false, email: storedEmail(ctx.flags.profile) ?? null }, human: () => `${warn("○")} Sin sesión CEFE. Corre ${bold("idrd cefe auth login --email <correo>")}`, nextSteps: [{ command: "idrd cefe auth login --email <correo>", description: "iniciar sesión" }] };
+  if (!s) return { data: { loggedIn: false, email: storedEmail(ctx.flags.profile) ?? null }, human: () => `${warn("○")} Sin sesión CEFE. Corre ${bold("cupo cefe auth login --email <correo>")}`, nextSteps: [{ command: "cupo cefe auth login --email <correo>", description: "iniciar sesión" }] };
   let user: api.CefeUser | null = null;
   let liveCheck = "ok";
   try {
@@ -100,7 +100,7 @@ export async function cefeRegister(ctx: Ctx) {
     const { token, user } = await api.register(body);
     persistSession(ctx.flags.profile, body.email, token, user);
     a.complete({ userId: user.userId });
-    return { data: { email: body.email, user: { ...user, raw: undefined } }, human: () => `${ok("✓")} Cuenta creada e iniciada: ${bold(body.email)}`, nextSteps: [{ command: "idrd cefe me", description: "ver el perfil (completa teléfono, estrato y fecha de nacimiento en la web)" }] };
+    return { data: { email: body.email, user: { ...user, raw: undefined } }, human: () => `${ok("✓")} Cuenta creada e iniciada: ${bold(body.email)}`, nextSteps: [{ command: "cupo cefe me", description: "ver el perfil (completa teléfono, estrato y fecha de nacimiento en la web)" }] };
   } catch (e) {
     a.fail({ error: e instanceof AppError ? e.code : String(e) });
     throw e;
@@ -136,7 +136,7 @@ export async function cefePoolList(ctx: Ctx) {
       const today = p.hours.find((h) => fold(h.day) === fold(todayName()));
       return [strong(p.poolId), `${p.name}${p.active ? "" : muted(" (inactiva)")}`, String(p.capacity), today ? `${today.open}–${today.close}` : muted("—")];
     }), [38, 30, 5, 14]),
-    nextSteps: pools[0] ? [{ command: `idrd cefe slot list ${pools[0].poolId} --date mañana`, description: "cupos por hora" }, { command: "idrd cefe find --date sab", description: "buscar en todas" }] : [],
+    nextSteps: pools[0] ? [{ command: `cupo cefe slot list ${pools[0].poolId} --date mañana`, description: "cupos por hora" }, { command: "cupo cefe find --date sab", description: "buscar en todas" }] : [],
   };
 }
 
@@ -159,7 +159,7 @@ export async function cefePoolGet(ctx: Ctx) {
         cfg.default ? `${muted("Franjas")}    ${cfg.default.slots.map((s) => s.time).sort().join(" ")}${Object.values(cfg.weekly ?? {}).some((d) => d.isClosed) ? dim(`  (cerrada: ${Object.entries(cfg.weekly ?? {}).filter(([, d]) => d.isClosed).map(([k]) => k.toLowerCase()).join(", ")})`) : ""}` : "",
         rating && rating.overallAverage !== undefined ? `${muted("Opiniones")}  ${String(rating.overallAverage)}/5 (${String(rating.totalRatings)} calificaciones) · NPS ${String(rating.npsScore)}` : "",
       ].filter(Boolean).join("\n"),
-    nextSteps: [{ command: `idrd cefe slot list ${pool.poolId} --date mañana`, description: "cupos por hora" }],
+    nextSteps: [{ command: `cupo cefe slot list ${pool.poolId} --date mañana`, description: "cupos por hora" }],
   };
 }
 
@@ -183,7 +183,7 @@ export async function cefeSlotList(ctx: Ctx) {
   return {
     data: { poolId: pool.poolId, pool: pool.name, date, slots, priceEstimate: priceEstimate(date, 1) },
     human: () => `${bold(`${pool.name} · ${date}`)}${priceEstimate(date, 1) ? muted(`  · ${cop(priceEstimate(date, 1))} por persona`) : muted("  · gratis")}\n${renderSlots(slots)}`,
-    nextSteps: first ? [{ command: `idrd cefe booking create ${pool.poolId} --date ${date} --time ${first.time}`, description: "vista previa de la reserva (no reserva nada)" }] : [{ command: `idrd cefe find --date ${addDays(date, 1)}`, description: "probar otro día" }],
+    nextSteps: first ? [{ command: `cupo cefe booking create ${pool.poolId} --date ${date} --time ${first.time}`, description: "vista previa de la reserva (no reserva nada)" }] : [{ command: `cupo cefe find --date ${addDays(date, 1)}`, description: "probar otro día" }],
   };
 }
 
@@ -211,7 +211,7 @@ export async function cefeSlotFind(ctx: Ctx) {
       if (!results.length) return `${head}\n\n  Sin cupos libres en esa franja.${failed.length ? dim(`\n  (${failed.length} no respondieron)`) : ""}`;
       return `${head}\n\n${table(["Piscina", "Cupos libres (hora: cupos)"], results.map((r) => [r.pool.name, r.slots.map((s) => `${s.time} ${ok(String(s.free))}`).join("  ")]), [30, 80])}${failed.length ? dim(`\n\n${failed.length} no respondieron.`) : ""}`;
     },
-    nextSteps: best ? [{ command: `idrd cefe booking create ${results[0]!.pool.poolId} --date ${date} --time ${best.time}`, description: "vista previa de la reserva (no reserva nada)" }] : [{ command: `idrd cefe find --date ${addDays(date, 1)}`, description: "probar otro día" }],
+    nextSteps: best ? [{ command: `cupo cefe booking create ${results[0]!.pool.poolId} --date ${date} --time ${best.time}`, description: "vista previa de la reserva (no reserva nada)" }] : [{ command: `cupo cefe find --date ${addDays(date, 1)}`, description: "probar otro día" }],
   };
 }
 
@@ -241,7 +241,7 @@ export async function cefeBookingCreate(ctx: Ctx) {
   // dependents: --dependent 1,2 picks from the profile's list (1-based), like the SPA's checkboxes
   const picks = (str(ctx.args, "dependent") ?? "").split(",").map((x) => x.trim()).filter(Boolean).map(Number);
   const dependents = picks.map((n) => user.dependents[n - 1]).filter((d): d is NonNullable<typeof d> => Boolean(d));
-  if (dependents.length !== picks.length) fail("usage/bad-arg", `--dependent fuera de rango: tu perfil tiene ${user.dependents.length} dependiente(s).`, "Mira `idrd cefe me`.");
+  if (dependents.length !== picks.length) fail("usage/bad-arg", `--dependent fuera de rango: tu perfil tiene ${user.dependents.length} dependiente(s).`, "Mira `cupo cefe me`.");
   const people = 1 + dependents.length;
   const price = priceEstimate(date, people);
   const pay = parsePay(str(ctx.args, "pay"), price);
@@ -273,16 +273,16 @@ export async function cefeBookingCreate(ctx: Ctx) {
   if (!live) {
     audit(ctx, "cefe.booking.create", "cefe booking create", "T2", { poolId: pool.poolId, date, time, people, pay, ready }).dryRun();
     return {
-      data: { dryRun: true, ready, where, pay, price, request: { method: "POST", url: "/reservations", body }, checks, note: "La reserva se puede cancelar hasta 6 h antes con `idrd cefe booking cancel`." },
-      human: () => [bold("Vista previa — no se reservó nada"), `${muted("Qué")}   ${where}`, `${muted("Pago")}  ${payLabel}`, "", ...checks.map((c) => `${c.ok ? ok("✓") : danger("✗")} ${c.name.padEnd(13)} ${muted(c.detail)}`), "", ready ? `${dim("Para reservar de verdad:")}\n  idrd cefe booking create ${argv} --yes` : danger("No se puede reservar mientras haya checks en rojo.")].join("\n"),
-      nextSteps: ready ? [{ command: `idrd cefe booking create ${argv} --yes`, description: "RESERVA REAL (cancelable hasta 6 h antes)" }] : checks.find((c) => c.name === "cupos" && !c.ok) ? [{ command: `idrd cefe slot list ${pool.poolId} --date ${date} --free`, description: "ver franjas con cupo" }] : [],
+      data: { dryRun: true, ready, where, pay, price, request: { method: "POST", url: "/reservations", body }, checks, note: "La reserva se puede cancelar hasta 6 h antes con `cupo cefe booking cancel`." },
+      human: () => [bold("Vista previa — no se reservó nada"), `${muted("Qué")}   ${where}`, `${muted("Pago")}  ${payLabel}`, "", ...checks.map((c) => `${c.ok ? ok("✓") : danger("✗")} ${c.name.padEnd(13)} ${muted(c.detail)}`), "", ready ? `${dim("Para reservar de verdad:")}\n  cupo cefe booking create ${argv} --yes` : danger("No se puede reservar mientras haya checks en rojo.")].join("\n"),
+      nextSteps: ready ? [{ command: `cupo cefe booking create ${argv} --yes`, description: "RESERVA REAL (cancelable hasta 6 h antes)" }] : checks.find((c) => c.name === "cupos" && !c.ok) ? [{ command: `cupo cefe slot list ${pool.poolId} --date ${date} --free`, description: "ver franjas con cupo" }] : [],
     };
   }
 
   assertWritable();
   const failed = checks.find((c) => !c.ok);
   if (failed) fail(failed.name === "cupos" || failed.name === "franja" ? "slot/unavailable" : failed.name === "una-por-dia" ? "rule/violation" : "safety/precheck", `No reservo: ${failed.name} — ${failed.detail}`);
-  await approveGate({ cliName: "idrd", flags: { json: ctx.flags.json, noInput: ctx.flags.noInput } }, { title: "Reserva CEFE Chapinero", summary: `${where} · ${payLabel}` }, { trust: "T2", yes: true });
+  await approveGate({ cliName: "cupo", flags: { json: ctx.flags.json, noInput: ctx.flags.noInput } }, { title: "Reserva CEFE Chapinero", summary: `${where} · ${payLabel}` }, { trust: "T2", yes: true });
   const a = audit(ctx, "cefe.booking.create", "cefe booking create", "T2", { poolId: pool.poolId, date, time, people, pay, price });
   try {
     const raw = await api.createReservation(s.token, body);
@@ -293,9 +293,9 @@ export async function cefeBookingCreate(ctx: Ctx) {
       human: () => [
         `${ok("✓")} Reserva creada: ${bold(res.id || "(id en la web)")} · ${where}`,
         pay === "EFECTIVO" ? `  Pendiente: paga ${cop(price)} en la sede antes de entrar.` : pay === "WOMPI" ? `  Pendiente de pago: completa el pago con Wompi en ${WEB}/client/reservations` : `  ${ok("Confirmada.")}`,
-        dim("  Se puede cancelar hasta 6 h antes: idrd cefe booking cancel " + (res.id || "<id>") + " --yes"),
+        dim("  Se puede cancelar hasta 6 h antes: cupo cefe booking cancel " + (res.id || "<id>") + " --yes"),
       ].join("\n"),
-      nextSteps: [{ command: "idrd cefe booking list", description: "ver tus reservas" }],
+      nextSteps: [{ command: "cupo cefe booking list", description: "ver tus reservas" }],
     };
   } catch (e) {
     a.fail({ error: e instanceof AppError ? e.code : String(e) });
@@ -315,7 +315,7 @@ export async function cefeBookingList(ctx: Ctx) {
   return {
     data: list.map((r) => ({ ...r, raw: undefined, cancellable: canCancel(r).ok })),
     human: () => list.length === 0 ? "Sin reservas." : table(["id", "Piscina", "Cuándo", "Estado", "Pago", "Valor"], list.map((r) => [strong(r.id), r.poolName, `${r.startTime.slice(0, 10)} ${hhmm(r.startTime)}–${hhmm(r.endTime)}`, r.status === "confirmed" ? ok(r.status) : r.status === "cancelled" ? muted(r.status) : warn(r.status), `${r.paymentMethod ?? "—"}${r.paymentStatus ? ` (${r.paymentStatus})` : ""}`, r.price ? cop(r.price) : muted("gratis")]), [44, 24, 24, 11, 18, 10]),
-    nextSteps: list.find((r) => canCancel(r).ok) ? [{ command: `idrd cefe booking cancel ${list.find((r) => canCancel(r).ok)!.id} --yes`, description: "cancelar una reserva (hasta 6 h antes)" }] : [],
+    nextSteps: list.find((r) => canCancel(r).ok) ? [{ command: `cupo cefe booking cancel ${list.find((r) => canCancel(r).ok)!.id} --yes`, description: "cancelar una reserva (hasta 6 h antes)" }] : [],
   };
 }
 
@@ -324,11 +324,11 @@ export async function cefeBookingCancel(ctx: Ctx) {
   const id = positional(ctx.args, 0, "reservationId");
   const list = await api.userReservations(s.token, s.user.userId);
   const r = list.find((x) => x.id === id);
-  if (!r) fail("not-found/booking", `No encontré la reserva ${id} en tu cuenta.`, "Mira `idrd cefe booking list`.");
+  if (!r) fail("not-found/booking", `No encontré la reserva ${id} en tu cuenta.`, "Mira `cupo cefe booking list`.");
   const can = canCancel(r);
   if (!can.ok) fail("rule/violation", `No se puede cancelar: ${can.reason}.`, "El portal permite cancelar hasta 6 h antes de la hora reservada.");
   assertWritable();
-  await approveGate({ cliName: "idrd", flags: { json: ctx.flags.json, noInput: ctx.flags.noInput } }, { title: "Cancelar reserva", summary: `${r.poolName} · ${r.startTime}` }, { trust: "T2", yes: ctx.args.yes === true });
+  await approveGate({ cliName: "cupo", flags: { json: ctx.flags.json, noInput: ctx.flags.noInput } }, { title: "Cancelar reserva", summary: `${r.poolName} · ${r.startTime}` }, { trust: "T2", yes: ctx.args.yes === true });
   const a = audit(ctx, "cefe.booking.cancel", "cefe booking cancel", "T2", { reservationId: id });
   try {
     await api.cancelReservation(s.token, id);
@@ -352,7 +352,7 @@ export async function cefeCourseList(ctx: Ctx) {
   return {
     data: courses,
     human: () => courses.length === 0 ? "Sin cursos con esos filtros." : table(["courseId", "Curso", "Horario", "Precio (estrato 1-3 / 4-6)", "Cupo"], courses.map((c) => [strong(c.courseId.slice(0, 8)), c.name, c.schedule.map((x) => `${dayEs(x.day)} ${x.start}`).join(" · "), `${cop(c.priceEstrato1_3)} / ${cop(c.priceEstrato4_6)}`, c.full ? muted("lleno") : ok("hay")]), [10, 38, 34, 30, 6]) + dim("\n\nEl courseId completo está en --json; los comandos aceptan el prefijo de 8 caracteres."),
-    nextSteps: courses[0] ? [{ command: `idrd cefe course get ${courses[0].courseId.slice(0, 8)}`, description: "detalle y clases disponibles" }] : [],
+    nextSteps: courses[0] ? [{ command: `cupo cefe course get ${courses[0].courseId.slice(0, 8)}`, description: "detalle y clases disponibles" }] : [],
   };
 }
 
@@ -361,7 +361,7 @@ async function resolveCourse(raw: string): Promise<api.Course> {
   const hits = courses.filter((c) => c.courseId === raw || c.courseId.startsWith(raw) || fold(c.name) === fold(raw));
   if (hits.length === 1) return hits[0]!;
   if (hits.length > 1) fail("usage/ambiguous", `Varios cursos coinciden con "${raw}".`, "Usa más caracteres del courseId.");
-  return fail("not-found/resource", `No encontré el curso "${raw}".`, "Mira `idrd cefe course list`.");
+  return fail("not-found/resource", `No encontré el curso "${raw}".`, "Mira `cupo cefe course list`.");
 }
 
 export async function cefeCourseGet(ctx: Ctx) {
@@ -381,7 +381,7 @@ export async function cefeCourseGet(ctx: Ctx) {
       "",
       dim(c.description.slice(0, 300)),
     ].filter(Boolean).join("\n"),
-    nextSteps: [{ command: `idrd cefe course enroll ${c.courseId.slice(0, 8)}`, description: "vista previa de la inscripción" }],
+    nextSteps: [{ command: `cupo cefe course enroll ${c.courseId.slice(0, 8)}`, description: "vista previa de la inscripción" }],
   };
 }
 
@@ -431,19 +431,19 @@ export async function cefeCourseEnroll(ctx: Ctx) {
     audit(ctx, "cefe.course.enroll", "cefe course enroll", "T2", { courseId: c.courseId, pay, price, ready }).dryRun();
     return {
       data: { dryRun: true, ready, summary, request: { method: "POST", url: `/courses/${c.courseId}/users/${user.userId}/enroll`, body }, checks },
-      human: () => [bold("Vista previa — no se inscribió a nadie"), `${muted("Qué")}  ${summary}`, "", ...checks.map((x) => `${x.ok ? ok("✓") : danger("✗")} ${x.name.padEnd(11)} ${muted(x.detail)}`), "", ready ? `${dim("Para inscribir de verdad:")}\n  idrd cefe course enroll ${c.courseId.slice(0, 8)}${pay === "WOMPI" ? " --pay wompi" : ""} --yes` : danger("No se puede inscribir mientras haya checks en rojo.")].join("\n"),
-      nextSteps: ready ? [{ command: `idrd cefe course enroll ${c.courseId.slice(0, 8)}${pay === "WOMPI" ? " --pay wompi" : ""} --yes`, description: "INSCRIPCIÓN REAL (queda pendiente de pago)" }] : [],
+      human: () => [bold("Vista previa — no se inscribió a nadie"), `${muted("Qué")}  ${summary}`, "", ...checks.map((x) => `${x.ok ? ok("✓") : danger("✗")} ${x.name.padEnd(11)} ${muted(x.detail)}`), "", ready ? `${dim("Para inscribir de verdad:")}\n  cupo cefe course enroll ${c.courseId.slice(0, 8)}${pay === "WOMPI" ? " --pay wompi" : ""} --yes` : danger("No se puede inscribir mientras haya checks en rojo.")].join("\n"),
+      nextSteps: ready ? [{ command: `cupo cefe course enroll ${c.courseId.slice(0, 8)}${pay === "WOMPI" ? " --pay wompi" : ""} --yes`, description: "INSCRIPCIÓN REAL (queda pendiente de pago)" }] : [],
     };
   }
   assertWritable();
   const failed = checks.find((x) => !x.ok);
   if (failed) fail("safety/precheck", `No inscribo: ${failed.name} — ${failed.detail}`);
-  await approveGate({ cliName: "idrd", flags: { json: ctx.flags.json, noInput: ctx.flags.noInput } }, { title: "Inscripción a curso", summary }, { trust: "T2", yes: true });
+  await approveGate({ cliName: "cupo", flags: { json: ctx.flags.json, noInput: ctx.flags.noInput } }, { title: "Inscripción a curso", summary }, { trust: "T2", yes: true });
   const a = audit(ctx, "cefe.course.enroll", "cefe course enroll", "T2", { courseId: c.courseId, pay, price });
   try {
     const res = await api.enroll(s.token, c.courseId, user.userId, body);
     a.complete({});
-    return { data: { courseId: c.courseId, price, pay, response: res }, human: () => `${ok("✓")} Inscripción creada: ${summary}.\n  ${pay === "CASH" ? "Actívala pagando en la sede." : `Completa el pago en ${WEB}/client/courses`}`, nextSteps: [{ command: "idrd cefe course mine", description: "ver inscripciones" }] };
+    return { data: { courseId: c.courseId, price, pay, response: res }, human: () => `${ok("✓")} Inscripción creada: ${summary}.\n  ${pay === "CASH" ? "Actívala pagando en la sede." : `Completa el pago en ${WEB}/client/courses`}`, nextSteps: [{ command: "cupo cefe course mine", description: "ver inscripciones" }] };
   } catch (e) {
     a.fail({ error: e instanceof AppError ? e.code : String(e) });
     throw e;
@@ -470,19 +470,19 @@ export async function cefeClassBook(ctx: Ctx) {
     audit(ctx, "cefe.class.book", "cefe class book", "T2", { courseId: c.courseId, at, ready }).dryRun();
     return {
       data: { dryRun: true, ready, courseId: c.courseId, classDateTime: at, checks },
-      human: () => [bold("Vista previa — no se reservó la clase"), `${muted("Qué")}  ${c.name} · ${at.slice(0, 16).replace("T", " ")}`, "", ...checks.map((x) => `${x.ok ? ok("✓") : danger("✗")} ${x.name.padEnd(11)} ${muted(x.detail)}`), "", ready ? `${dim("Para reservar de verdad:")}\n  idrd cefe class book ${c.courseId.slice(0, 8)} --date ${date} --yes` : danger("No se puede reservar mientras haya checks en rojo.")].join("\n"),
-      nextSteps: ready ? [{ command: `idrd cefe class book ${c.courseId.slice(0, 8)} --date ${date} --yes`, description: "RESERVA REAL de la clase" }] : [],
+      human: () => [bold("Vista previa — no se reservó la clase"), `${muted("Qué")}  ${c.name} · ${at.slice(0, 16).replace("T", " ")}`, "", ...checks.map((x) => `${x.ok ? ok("✓") : danger("✗")} ${x.name.padEnd(11)} ${muted(x.detail)}`), "", ready ? `${dim("Para reservar de verdad:")}\n  cupo cefe class book ${c.courseId.slice(0, 8)} --date ${date} --yes` : danger("No se puede reservar mientras haya checks en rojo.")].join("\n"),
+      nextSteps: ready ? [{ command: `cupo cefe class book ${c.courseId.slice(0, 8)} --date ${date} --yes`, description: "RESERVA REAL de la clase" }] : [],
     };
   }
   assertWritable();
   const failed = checks.find((x) => !x.ok);
   if (failed) fail(failed.name === "cupo" || failed.name === "clase" ? "slot/unavailable" : "safety/precheck", `No reservo: ${failed.name} — ${failed.detail}`);
-  await approveGate({ cliName: "idrd", flags: { json: ctx.flags.json, noInput: ctx.flags.noInput } }, { title: "Reservar clase", summary: `${c.name} · ${at}` }, { trust: "T2", yes: true });
+  await approveGate({ cliName: "cupo", flags: { json: ctx.flags.json, noInput: ctx.flags.noInput } }, { title: "Reservar clase", summary: `${c.name} · ${at}` }, { trust: "T2", yes: true });
   const a = audit(ctx, "cefe.class.book", "cefe class book", "T2", { courseId: c.courseId, at });
   try {
     const res = await api.bookClass(s.token, s.user.userId, c.courseId, at);
     a.complete({});
-    return { data: { courseId: c.courseId, classDateTime: at, response: res }, human: () => `${ok("✓")} Clase reservada: ${c.name} · ${at.slice(0, 16).replace("T", " ")}`, nextSteps: [{ command: "idrd cefe course mine", description: "ver clases reservadas" }] };
+    return { data: { courseId: c.courseId, classDateTime: at, response: res }, human: () => `${ok("✓")} Clase reservada: ${c.name} · ${at.slice(0, 16).replace("T", " ")}`, nextSteps: [{ command: "cupo cefe course mine", description: "ver clases reservadas" }] };
   } catch (e) {
     a.fail({ error: e instanceof AppError ? e.code : String(e) });
     throw e;
@@ -495,10 +495,10 @@ export async function cefeClassCancel(ctx: Ctx) {
   const date = parseDate(requireStr(ctx.args, "date"));
   const mine = await api.classBookings(s.token, s.user.userId, { courseId: c.courseId });
   const booking = mine.find((b) => String(b.classDateTime ?? "").startsWith(date));
-  if (!booking) fail("not-found/booking", `No tienes clase de ${c.name} el ${date}.`, "Mira `idrd cefe course mine`.");
+  if (!booking) fail("not-found/booking", `No tienes clase de ${c.name} el ${date}.`, "Mira `cupo cefe course mine`.");
   if (Date.parse(`${String(booking.classDateTime)}-05:00`) <= Date.now()) fail("rule/violation", "La clase ya pasó.");
   assertWritable();
-  await approveGate({ cliName: "idrd", flags: { json: ctx.flags.json, noInput: ctx.flags.noInput } }, { title: "Cancelar clase", summary: `${c.name} · ${String(booking.classDateTime)}` }, { trust: "T2", yes: ctx.args.yes === true });
+  await approveGate({ cliName: "cupo", flags: { json: ctx.flags.json, noInput: ctx.flags.noInput } }, { title: "Cancelar clase", summary: `${c.name} · ${String(booking.classDateTime)}` }, { trust: "T2", yes: ctx.args.yes === true });
   const a = audit(ctx, "cefe.class.cancel", "cefe class cancel", "T2", { courseId: c.courseId, at: booking.classDateTime });
   try {
     await api.cancelClass(s.token, s.user.userId, c.courseId, String(booking.classDateTime));
@@ -518,7 +518,7 @@ export async function cefeTournamentList(ctx: Ctx) {
   return {
     data: list,
     human: () => list.length === 0 ? "Sin torneos publicados." : list.map((t) => `  ${strong(String(t.tournamentId ?? t.id))}  ${String(t.name ?? "")}  ${muted(String(t.status ?? ""))}${t.registrationCloseAt ? muted(`  inscripciones hasta ${String(t.registrationCloseAt).slice(0, 10)}`) : ""}`).join("\n"),
-    nextSteps: list[0] ? [{ command: `idrd cefe tournament get ${String(list[0].tournamentId ?? list[0].id)}`, description: "competiciones del torneo" }] : [],
+    nextSteps: list[0] ? [{ command: `cupo cefe tournament get ${String(list[0].tournamentId ?? list[0].id)}`, description: "competiciones del torneo" }] : [],
   };
 }
 
@@ -529,7 +529,7 @@ export async function cefeTournamentGet(ctx: Ctx) {
   return {
     data: { ...t, competitions: comps },
     human: () => [bold(String(t.name ?? id)) + muted(`  ${String(t.status ?? "")}`), ...comps.map((c) => `  ${strong(String(c.competitionId ?? c.id))}  ${String(c.name ?? "")}  ${muted([c.category, c.sex, c.distance].filter(Boolean).map(String).join(" · "))}`)].join("\n"),
-    nextSteps: comps[0] ? [{ command: `idrd cefe tournament register ${id} --competition ${String(comps[0].competitionId ?? comps[0].id)} --yes`, description: "inscribirse en una competición" }] : [],
+    nextSteps: comps[0] ? [{ command: `cupo cefe tournament register ${id} --competition ${String(comps[0].competitionId ?? comps[0].id)} --yes`, description: "inscribirse en una competición" }] : [],
   };
 }
 
@@ -545,12 +545,12 @@ export async function cefeTournamentRegister(ctx: Ctx) {
   const comp = requireStr(ctx.args, "competition");
   const body = { ...(str(ctx.args, "dependent") ? { dependentIdentification: str(ctx.args, "dependent") } : {}), ...(str(ctx.args, "sex") ? { sex: str(ctx.args, "sex") } : {}), ...(str(ctx.args, "observation") ? { observation: str(ctx.args, "observation") } : {}) };
   assertWritable();
-  await approveGate({ cliName: "idrd", flags: { json: ctx.flags.json, noInput: ctx.flags.noInput } }, { title: "Inscripción a torneo", summary: `torneo ${id} · competición ${comp}` }, { trust: "T2", yes: ctx.args.yes === true });
+  await approveGate({ cliName: "cupo", flags: { json: ctx.flags.json, noInput: ctx.flags.noInput } }, { title: "Inscripción a torneo", summary: `torneo ${id} · competición ${comp}` }, { trust: "T2", yes: ctx.args.yes === true });
   const a = audit(ctx, "cefe.tournament.register", "cefe tournament register", "T2", { tournamentId: id, competitionId: comp, dependent: body.dependentIdentification ?? null });
   try {
     const res = await api.registerCompetition(s.token, id, comp, body);
     a.complete({});
-    return { data: { tournamentId: id, competitionId: comp, response: res }, human: () => `${ok("✓")} Inscripción registrada en la competición ${comp}.`, nextSteps: [{ command: "idrd cefe tournament mine", description: "ver inscripciones" }] };
+    return { data: { tournamentId: id, competitionId: comp, response: res }, human: () => `${ok("✓")} Inscripción registrada en la competición ${comp}.`, nextSteps: [{ command: "cupo cefe tournament mine", description: "ver inscripciones" }] };
   } catch (e) {
     a.fail({ error: e instanceof AppError ? e.code : String(e) });
     throw e;
@@ -562,7 +562,7 @@ export async function cefeTournamentUnregister(ctx: Ctx) {
   const id = positional(ctx.args, 0, "tournamentId");
   const comp = requireStr(ctx.args, "competition");
   assertWritable();
-  await approveGate({ cliName: "idrd", flags: { json: ctx.flags.json, noInput: ctx.flags.noInput } }, { title: "Cancelar inscripción a torneo", summary: `torneo ${id} · competición ${comp}` }, { trust: "T2", yes: ctx.args.yes === true });
+  await approveGate({ cliName: "cupo", flags: { json: ctx.flags.json, noInput: ctx.flags.noInput } }, { title: "Cancelar inscripción a torneo", summary: `torneo ${id} · competición ${comp}` }, { trust: "T2", yes: ctx.args.yes === true });
   const a = audit(ctx, "cefe.tournament.unregister", "cefe tournament unregister", "T2", { tournamentId: id, competitionId: comp });
   try {
     await api.unregisterCompetition(s.token, id, comp, str(ctx.args, "dependent"));

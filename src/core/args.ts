@@ -40,7 +40,7 @@ export function requireStr(args: ParsedArgs, key: string, flag = `--${key}`): st
 
 export function positional(args: ParsedArgs, index: number, name: string): string {
   const v = args._[index];
-  if (!v) fail("usage/missing-arg", `Falta el argumento <${name}>.`, `Uso: ver \`idrd help\`.`);
+  if (!v) fail("usage/missing-arg", `Falta el argumento <${name}>.`, `Uso: ver \`cupo help\`.`);
   return v;
 }
 

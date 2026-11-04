@@ -23,7 +23,7 @@ type Check = { name: string; ok: boolean; detail: string };
 
 function assertWritable(): void {
   const k = getKillswitchState(appHome());
-  if (k.active) fail("safety/killswitch", `Killswitch activo${k.reason ? ` (${k.reason})` : ""}: escrituras bloqueadas.`, "Desactívalo con `idrd killswitch off`.");
+  if (k.active) fail("safety/killswitch", `Killswitch activo${k.reason ? ` (${k.reason})` : ""}: escrituras bloqueadas.`, "Desactívalo con `cupo killswitch off`.");
 }
 
 function audit(ctx: Ctx, kind: string, command: string, tier: string, meta: Record<string, unknown>) {
@@ -51,7 +51,7 @@ export async function bookingCreate(ctx: Ctx) {
   let hours: number;
   if (spec.block) {
     const block = str(ctx.args, "hour") ? dayBlocks.find((b) => b.from === parseHour(str(ctx.args, "hour")!)) : dayBlocks.find((b) => b.available) ?? dayBlocks[0];
-    if (!block) fail("slot/unavailable", `No hay bloques publicados para ${date}.`, `Mira otros días con \`idrd slot list ${courtId} --date <día>\`.`);
+    if (!block) fail("slot/unavailable", `No hay bloques publicados para ${date}.`, `Mira otros días con \`cupo idrd slot list ${courtId} --date <día>\`.`);
     startHour = block.from;
     hours = int(ctx.args, "hours", block.to - block.from)!;
   } else {
@@ -89,7 +89,7 @@ export async function bookingCreate(ctx: Ctx) {
   });
 
   if (spec.needs === "sport") {
-    checks.push({ name: "deporte", ok: cal.sportId !== undefined, detail: cal.sportId !== undefined ? `sport_id ${cal.sportId}` : `falta --sport-id (idrd court sports ${courtId})` });
+    checks.push({ name: "deporte", ok: cal.sportId !== undefined, detail: cal.sportId !== undefined ? `sport_id ${cal.sportId}` : `falta --sport-id (cupo idrd court sports ${courtId})` });
   }
 
   // ---- beneficiary and responsible adult (CEFE pools: ages 5–12 need one; the portal then creates two bookings)
@@ -153,14 +153,14 @@ export async function bookingCreate(ctx: Ctx) {
           ...checks.map((c) => `${c.ok ? ok("✓") : danger("✗")} ${c.name.padEnd(15)} ${muted(c.detail)}`),
           "",
           warn(`! ${preview.warning}`),
-          ready ? `\n${dim("Para reservar de verdad:")}\n  idrd booking create ${argv} --yes --confirm ${strong(intent)}` : danger("\nNo se puede reservar mientras haya checks en rojo."),
+          ready ? `\n${dim("Para reservar de verdad:")}\n  cupo idrd booking create ${argv} --yes --confirm ${strong(intent)}` : danger("\nNo se puede reservar mientras haya checks en rojo."),
         ].join("\n"),
       nextSteps: ready
-        ? [{ command: `idrd booking create ${argv} --yes --confirm ${intent}`, description: "RESERVA REAL e irreversible" }]
+        ? [{ command: `cupo idrd booking create ${argv} --yes --confirm ${intent}`, description: "RESERVA REAL e irreversible" }]
         : checks.find((c) => c.name === "sesion" && !c.ok)
-          ? [{ command: "idrd auth login --email <correo>", description: "iniciar sesión y volver a previsualizar" }]
+          ? [{ command: "cupo idrd auth login --email <correo>", description: "iniciar sesión y volver a previsualizar" }]
           : checks.find((c) => c.name === "disponibilidad" && !c.ok)
-            ? [{ command: `idrd slot list ${courtId} --date ${date} --free${cal.lane ? ` --lane ${cal.lane}` : ""}${cal.sportId ? ` --sport-id ${cal.sportId}` : ""}`, description: "ver horas libres de ese espacio" }]
+            ? [{ command: `cupo idrd slot list ${courtId} --date ${date} --free${cal.lane ? ` --lane ${cal.lane}` : ""}${cal.sportId ? ` --sport-id ${cal.sportId}` : ""}`, description: "ver horas libres de ese espacio" }]
             : [],
     };
   }
@@ -173,7 +173,7 @@ export async function bookingCreate(ctx: Ctx) {
     fail(code, `No reservo: ${failed.name} — ${failed.detail}`);
   }
   await approveGate(
-    { cliName: "idrd", flags: { json: ctx.flags.json, noInput: ctx.flags.noInput } },
+    { cliName: "cupo", flags: { json: ctx.flags.json, noInput: ctx.flags.noInput } },
     { title: "Reserva irreversible", summary: `${where} · ${date} ${hourLabel(startHour)}–${hourLabel(startHour + hours)}` },
     { trust: "T3", yes: true, confirm: str(ctx.args, "confirm"), confirmAgainst: intent },
   );
@@ -216,11 +216,11 @@ export async function bookingCreate(ctx: Ctx) {
       ].filter(Boolean).join("\n"),
     nextSteps:
       payment && payment.ok === false
-        ? [{ command: `idrd pay pse ${booking.bookingId}${booking.free ? "" : ` --bank ${bank}`} --yes`, description: booking.free ? "reintentar la confirmación gratuita" : "reintentar el link de pago" }]
+        ? [{ command: `cupo idrd pay pse ${booking.bookingId}${booking.free ? "" : ` --bank ${bank}`} --yes`, description: booking.free ? "reintentar la confirmación gratuita" : "reintentar el link de pago" }]
         : !booking.free && !payment
         ? [
-            { command: "idrd pay banks", description: "elegir banco" },
-            { command: `idrd pay pse ${booking.bookingId} --bank <código> --yes`, description: "generar link de pago PSE" },
+            { command: "cupo idrd pay banks", description: "elegir banco" },
+            { command: `cupo idrd pay pse ${booking.bookingId} --bank <código> --yes`, description: "generar link de pago PSE" },
           ]
         : [],
   };
@@ -275,7 +275,7 @@ export async function payPse(ctx: Ctx) {
     };
   }
   await approveGate(
-    { cliName: "idrd", flags: { json: ctx.flags.json, noInput: ctx.flags.noInput } },
+    { cliName: "cupo", flags: { json: ctx.flags.json, noInput: ctx.flags.noInput } },
     { title: b.free ? "Confirmar reserva gratuita" : "Crear orden de pago PSE", summary: `Reserva ${b.bookingId} · $${b.amount}` },
     { trust: "T2", yes: ctx.args.yes === true },
   );
@@ -290,7 +290,7 @@ export async function payPse(ctx: Ctx) {
       out.bankUrl
         ? `${bold("Link de pago PSE:")} ${out.bankUrl}\n${muted("Ábrelo y paga en tu banco. Nadie más debe usarlo.")}`
         : `${ok("✓")} Reserva gratuita confirmada.${out.receiptUrl ? ` Comprobante: ${out.receiptUrl}` : ""}`,
-    nextSteps: out.paymentCode ? [{ command: `idrd pay status ${out.paymentCode}`, description: "ver si el pago quedó aprobado" }] : [],
+    nextSteps: out.paymentCode ? [{ command: `cupo idrd pay status ${out.paymentCode}`, description: "ver si el pago quedó aprobado" }] : [],
   };
 }
 

@@ -1,5 +1,5 @@
 ---
-cli: idrd
+cli: cupo (formerly idrd)
 target: Bogotá IDRD Portal Ciudadano — every bookable space (courts, pools per lane, grills, CEFE gyms by hour or membership, coliseums per sport), sport schools and programs with enrolment, account payments, PSE payment link
 origin: discovered
 terrain: B
@@ -8,7 +8,7 @@ status: internal
 distribution: source (Node bundle via bun build, npm link)
 ---
 
-# idrd
+# cupo
 
 ## What it does
 
@@ -44,7 +44,7 @@ and the owner was told the earlier report was wrong.
 ## Distribution choice
 
 Source, for one person and their agents. Written against Node's API surface;
-`bun build --target=node` emits a single 88 KB `dist/idrd.js` with a Node
+`bun build --target=node` emits a single 88 KB `dist/cupo.js` with a Node
 shebang, so `npm link` works without Bun at runtime — avoiding the
 runtime-specific-shebang defect the skill documents in the corpus.
 
@@ -114,9 +114,22 @@ refuses instead.
 
 The owner's CEFE Chapinero is not an IDRD facility; it runs its own platform.
 Recon (`docs/recon-cefe.md`) came from the Next.js bundle's service classes
-plus seven anonymous replays. Added as `idrd cefe …` (24 commands): pools and
+plus seven anonymous replays. Added as `cupo cefe …` (24 commands): pools and
 per-slot places, bookings (T2, cancellable), courses and classes, tournaments,
 promotions, profile. Writes mirror the SPA's payloads and are unexercised live.
+
+## Fourth pass: rename to the job (2026-11-04)
+
+With two providers the name `idrd` described a supplier, not the outcome.
+Renamed to `cupo` ("conseguir cupo" is the Bogotá phrase for getting a place
+in a pool, court or class). Three cross-provider commands were added above
+the providers: `find` (every result carries its `bookCommand`), `book`
+(routes by `idrd:`/`cefe:` id prefix), `providers` (the map). Provider
+commands moved under `cupo idrd …` / `cupo cefe …`; the old binary name stays
+as an alias and the old home and env names are still read. The mechanical
+rename was one script over 143 command strings and 141 test argv arrays; the
+two bugs it introduced (an arg named `id` became `idrd id`; envelope names got
+double-prefixed) were caught by the suite in one run.
 
 ## What the human-output pass caught that 63 green tests did not
 
@@ -147,9 +160,9 @@ derived from frontend code.
 ## Evidence
 
 - Code: `src` (CLI), `src/cli` (cligentic blocks)
-- Contract: `idrd schema`; shapes in `src/registry.ts`
-- Agent manual: `skills/idrd/SKILL.md` (frontmatter validated)
-- Tests: 95 pass, 0 fail across 8 files (unit, contract with mock portal, agent-first subprocess rules incl. real-TTY checks) — `bun run check`
+- Contract: `cupo schema`; shapes in `src/registry.ts`
+- Agent manual: `skills/cupo/SKILL.md` (frontmatter validated)
+- Tests: 99 pass, 0 fail across 9 files (unit, contract with mock portal, agent-first subprocess rules incl. real-TTY checks) — `bun run check`
 - Linked globally (`npm link`) and run by name against the live portal for all
   nine space kinds, pool lanes, coliseum sports, activities, PSE banks, and a
   404 path

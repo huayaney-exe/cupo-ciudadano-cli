@@ -75,16 +75,16 @@ export function logoutLocal(profile?: string): void {
 /** Returns a usable access token, refreshing when it is close to expiry. */
 export async function accessToken(profile?: string): Promise<{ token: string; session: IdrdSession; refreshed: boolean }> {
   const session = currentSession(profile);
-  if (!session) fail("auth/required", "No has iniciado sesión.", "Corre `idrd auth login --email <tu correo>`.");
+  if (!session) fail("auth/required", "No has iniciado sesión.", "Corre `cupo idrd auth login --email <tu correo>`.");
   const expiresAt = session.expiresAt ? Date.parse(session.expiresAt) : 0;
   if (expiresAt - Date.now() > REFRESH_MARGIN_MS) return { token: session.accessToken, session, refreshed: false };
-  if (!session.refreshToken) fail("auth/expired", "La sesión venció.", "Corre `idrd auth login`.");
+  if (!session.refreshToken) fail("auth/expired", "La sesión venció.", "Corre `cupo idrd auth login`.");
   try {
     const t = await refreshGrant(session.refreshToken);
     const next = persist(profile, session.email, t, session.refreshToken);
     return { token: next.accessToken, session: next, refreshed: true };
   } catch (err) {
-    if (err instanceof AppError) fail("auth/expired", "La sesión venció y no se pudo renovar.", "Corre `idrd auth login`.", err);
+    if (err instanceof AppError) fail("auth/expired", "La sesión venció y no se pudo renovar.", "Corre `cupo idrd auth login`.", err);
     throw err;
   }
 }

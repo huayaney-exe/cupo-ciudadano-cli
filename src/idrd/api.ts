@@ -36,7 +36,7 @@ function normalizeCourt(c: RawCourt, sport: Sport): Court {
 }
 
 function ensureOk<T>(res: { status: number; body: T }, what: string): T {
-  if (res.status === 401) fail("auth/unauthorized", "Sesión inválida o vencida.", "Corre `idrd auth login`.");
+  if (res.status === 401) fail("auth/unauthorized", "Sesión inválida o vencida.", "Corre `cupo idrd auth login`.");
   if (res.status === 404) fail("not-found/resource", `${what}: no existe.`);
   if (res.status === 422) fail("upstream/validation", `${what}: el portal rechazó la solicitud.`, upstreamMessage(res.body));
   if (res.status >= 400) fail("upstream/error", `${what}: HTTP ${res.status}.`, upstreamMessage(res.body));
@@ -231,7 +231,7 @@ export async function passwordGrant(email: string, password: string): Promise<To
 /** Standard Passport refresh grant. The portal's SPA never uses it: unverified live. */
 export async function refreshGrant(refreshToken: string): Promise<TokenSet> {
   const res = await tokenRequest({ grant_type: "refresh_token", refresh_token: refreshToken });
-  if (res.status >= 400) fail("auth/refresh-failed", "No pude renovar la sesión.", "Corre `idrd auth login` de nuevo.");
+  if (res.status >= 400) fail("auth/refresh-failed", "No pude renovar la sesión.", "Corre `cupo idrd auth login` de nuevo.");
   return toTokenSet(res.body);
 }
 

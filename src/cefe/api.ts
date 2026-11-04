@@ -19,9 +19,9 @@ async function call<T>(path: string, opts: RequestOptions & { what: string }): P
 
 function ensure<T>(res: Res<T>, what: string): T {
   const msg = () => upstreamMessage(res.body);
-  if (res.status === 401) fail("auth/unauthorized", `${what}: ${msg() || "sesión requerida"}.`, "Corre `idrd cefe auth login`.");
+  if (res.status === 401) fail("auth/unauthorized", `${what}: ${msg() || "sesión requerida"}.`, "Corre `cupo cefe auth login`.");
   // API Gateway answers 403 "Missing Authentication Token" both for unknown routes and for protected ones.
-  if (res.status === 403) fail("auth/forbidden", `${what}: el servidor rechazó la solicitud (${msg()}).`, "Inicia sesión con `idrd cefe auth login`; si persiste, la ruta cambió.");
+  if (res.status === 403) fail("auth/forbidden", `${what}: el servidor rechazó la solicitud (${msg()}).`, "Inicia sesión con `cupo cefe auth login`; si persiste, la ruta cambió.");
   if (res.status === 404) fail("not-found/resource", `${what}: no existe.`, msg());
   if (res.status === 400 || res.status === 422) fail("upstream/validation", `${what}: el servidor rechazó los datos.`, msg());
   if (res.status >= 400) fail("upstream/error", `${what}: HTTP ${res.status}.`, msg());

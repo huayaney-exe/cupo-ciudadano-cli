@@ -7,43 +7,47 @@ import { authLogin, authLogout, authStatus, bookingList, commandHelp, doctor, he
 import { activityCategories, activityGet, activityList, activityMine, activityPrograms, activityStages, activitySubscribe, activityUnsubscribe, profileList } from "./commands/activities.js";
 import { gymActivate, gymActive, gymAvailability, gymBuy, gymQuote, gymStatus } from "./commands/gym.js";
 import * as cefe from "./commands/cefe.js";
+import { book, find, providers } from "./commands/jobs.js";
 import type { Handler } from "./commands/context.js";
 import { courtGet, courtLanes, courtList, courtSports, slotFind, slotList } from "./commands/read.js";
 import { bookingCreate, payBanks, payPse, payStatus } from "./commands/write.js";
 import { COMMANDS, findCommand } from "./registry.js";
 
 const HANDLERS: Record<string, Handler> = {
-  "court list": courtList,
-  "court get": courtGet,
-  "court lanes": courtLanes,
-  "court sports": courtSports,
-  "slot list": slotList,
-  "slot find": slotFind,
-  "auth login": authLogin,
-  "auth status": authStatus,
-  "auth logout": authLogout,
-  "booking list": bookingList,
-  "booking create": bookingCreate,
-  "pay banks": payBanks,
-  "pay pse": payPse,
-  "pay status": payStatus,
-  "pay pending": payPending,
-  "pay history": payHistory,
-  "gym status": gymStatus,
-  "gym quote": gymQuote,
-  "gym availability": gymAvailability,
-  "gym active": gymActive,
-  "gym buy": gymBuy,
-  "gym activate": gymActivate,
-  "activity list": activityList,
-  "activity get": activityGet,
-  "activity programs": activityPrograms,
-  "activity stages": activityStages,
-  "activity categories": activityCategories,
-  "activity mine": activityMine,
-  "activity subscribe": activitySubscribe,
-  "activity unsubscribe": activityUnsubscribe,
-  "profile list": profileList,
+  find,
+  book,
+  providers,
+  "idrd court list": courtList,
+  "idrd court get": courtGet,
+  "idrd court lanes": courtLanes,
+  "idrd court sports": courtSports,
+  "idrd slot list": slotList,
+  "idrd slot find": slotFind,
+  "idrd auth login": authLogin,
+  "idrd auth status": authStatus,
+  "idrd auth logout": authLogout,
+  "idrd booking list": bookingList,
+  "idrd booking create": bookingCreate,
+  "idrd pay banks": payBanks,
+  "idrd pay pse": payPse,
+  "idrd pay status": payStatus,
+  "idrd pay pending": payPending,
+  "idrd pay history": payHistory,
+  "idrd gym status": gymStatus,
+  "idrd gym quote": gymQuote,
+  "idrd gym availability": gymAvailability,
+  "idrd gym active": gymActive,
+  "idrd gym buy": gymBuy,
+  "idrd gym activate": gymActivate,
+  "idrd activity list": activityList,
+  "idrd activity get": activityGet,
+  "idrd activity programs": activityPrograms,
+  "idrd activity stages": activityStages,
+  "idrd activity categories": activityCategories,
+  "idrd activity mine": activityMine,
+  "idrd activity subscribe": activitySubscribe,
+  "idrd activity unsubscribe": activityUnsubscribe,
+  "idrd profile list": profileList,
   "cefe auth login": cefe.cefeLogin,
   "cefe auth status": cefe.cefeStatus,
   "cefe auth logout": cefe.cefeLogout,
@@ -74,7 +78,10 @@ const HANDLERS: Record<string, Handler> = {
 };
 
 /** The single most common operation gets the shortest spelling. */
-const ALIASES: Record<string, string[]> = { find: ["slot", "find"], space: ["court"], activities: ["activity"], "cefe find": ["cefe", "slot", "find"], "cefe pools": ["cefe", "pool", "list"], "cefe courses": ["cefe", "course", "list"] };
+const ALIASES: Record<string, string[]> = {
+  "idrd find": ["idrd", "slot", "find"], "idrd space": ["idrd", "court"], "idrd activities": ["idrd", "activity"],
+  "cefe find": ["cefe", "slot", "find"], "cefe pools": ["cefe", "pool", "list"], "cefe courses": ["cefe", "course", "list"],
+};
 
 export async function main(argv: string[]): Promise<number> {
   const args = parseArgs(argv);
@@ -101,10 +108,10 @@ export async function main(argv: string[]): Promise<number> {
     // Bare invoke: humans get the banner and help on stderr; agents get a
     // structured usage error pointing at the schema. Never data on stdout.
     if (isJson(flags)) {
-      emitError("idrd", new AppError("usage/no-command", { name: "NoCommand", human: "Falta el comando.", hint: "Corre `idrd schema` para ver el contrato." }), flags);
+      emitError("cupo", new AppError("usage/no-command", { name: "NoCommand", human: "Falta el comando.", hint: "Corre `cupo schema` para ver el contrato." }), flags);
       return EXIT.usage;
     }
-    if (!args.noBanner) printBanner({ name: "IDRD", version: VERSION, tagline: "Portal Ciudadano · Bogotá", gradient: ["#F5C518", "#2E7D32"] });
+    if (!args.noBanner) printBanner({ name: "cupo", version: VERSION, tagline: "Cupo para hacer deporte en Bogotá", gradient: ["#00B4D8", "#2E7D32"] });
     process.stderr.write(`${helpText()}\n`);
     return EXIT.ok;
   }

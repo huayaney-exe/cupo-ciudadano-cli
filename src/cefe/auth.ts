@@ -63,7 +63,7 @@ export function logoutLocal(profile?: string): void {
 /** No refresh endpoint exists: an expired token means logging in again. */
 export function requireSession(profile?: string): CefeSession {
   const s = currentSession(profile);
-  if (!s) fail("auth/required", "No has iniciado sesión en CEFE Chapinero.", "Corre `idrd cefe auth login --email <tu correo>`.");
-  if (s.expiresAt && Date.parse(s.expiresAt) < Date.now()) fail("auth/expired", "La sesión de CEFE Chapinero venció.", "Corre `idrd cefe auth login` de nuevo.");
+  if (!s) fail("auth/required", "No has iniciado sesión en CEFE Chapinero.", "Corre `cupo cefe auth login --email <tu correo>`.");
+  if (s.expiresAt && Date.parse(s.expiresAt) < Date.now()) fail("auth/expired", "La sesión de CEFE Chapinero venció.", "Corre `cupo cefe auth login` de nuevo.");
   return s;
 }

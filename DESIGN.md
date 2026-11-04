@@ -1,4 +1,6 @@
-# idrd — design record
+# cupo — design record
+
+> Renamed from `idrd` on 2026-11-04 when a second provider joined. The binary keeps `idrd` as an alias; `~/.idrd` and `IDRD_*` still work.
 
 ## Phase 0: contract origin — **discovered**
 
@@ -8,13 +10,17 @@ The CLI wraps a system we do not control (IDRD Portal Ciudadano). Recon ran firs
 
 - Audience: the owner and the owner's agents, on one Mac. Not published.
 - Written against Node's API surface only (`fs`, `path`, `os`, `crypto`, global `fetch`), so the target is a build decision.
-- `bun build --target=node` → `dist/idrd.js` with a `#!/usr/bin/env node` shebang, so installing does not require Bun (the corpus failure the skill warns about). Bun is a dev tool only (build + tests).
-- **The built bundle is committed** (`dist/idrd.js`, ~146 KB, dependencies inlined). Install is `git clone` + `npm link` with only Node: no Bun, no build step. The first README said "no Bun needed" while its install block ran `bun install && bun run build` — contradicted by the instructions themselves. Trade-off: `dist/` can drift from `src/`; `bun run verify:dist` rebuilds and fails if the committed bundle differs.
-- Install: `git clone … && cd portal-ciudadano-cli && npm link`.
+- `bun build --target=node` → `dist/cupo.js` with a `#!/usr/bin/env node` shebang, so installing does not require Bun (the corpus failure the skill warns about). Bun is a dev tool only (build + tests).
+- **The built bundle is committed** (`dist/cupo.js`, ~146 KB, dependencies inlined). Install is `git clone` + `npm link` with only Node: no Bun, no build step. The first README said "no Bun needed" while its install block ran `bun install && bun run build` — contradicted by the instructions themselves. Trade-off: `dist/` can drift from `src/`; `bun run verify:dist` rebuilds and fails if the committed bundle differs.
+- Install: `git clone … && cd cupo && npm link`.
+
+## Phase 2b: the job above the providers (2026-11-04 rename)
+
+The job is "consígueme cupo para hacer deporte", not "operate the IDRD portal", so the surface is organized by job first: `find` fans out to every provider that offers the sport and returns one normalized result per space with a `bookCommand`; `book <id>` routes by the id prefix (`idrd:`/`cefe:`) and normalizes `--hour`/`--time`; `providers` is the map an agent reads first. Provider commands keep their full vocabulary under `cupo idrd …` and `cupo cefe …` (dispatch resolves up to four words). `schema` exposes `start`, `providers` and a `provider` per command so an agent can navigate without `--help`. Ids carry the provider so no command is ambiguous. `~/.idrd` is reused when `~/.cupo` does not exist; `IDRD_HOME/JSON/PROFILE` are read as old names of `CUPO_*`.
 
 ## Phase 2: command surface
 
-Noun-verb, English verbs agents already know (`list`, `get`, `create`), Spanish human output. Shorthand for the 90% operation: `idrd find` = `idrd slot find`.
+Noun-verb, English verbs agents already know (`list`, `get`, `create`), Spanish human output. Shorthand for the 90% operation: `cupo idrd find` = `cupo cupo idrd slot find`.
 
 | Command | Trust | Auth | Notes |
 |---|---|---|---|
@@ -44,7 +50,7 @@ error:   {ok:false, schemaVersion:1, command, error:{code, message, hint?}}
 exit:    0 ok · 1 unknown · 2 usage/rule · 3 auth · 4 not found · 5 refused (approval, killswitch, slot taken) · 6 upstream/network
 ```
 
-Per-command `data` shapes live in `src/registry.ts` (`output` field) and are served at runtime by `idrd schema`.
+Per-command `data` shapes live in `src/registry.ts` (`output` field) and are served at runtime by `cupo schema`.
 
 ## Phase 4: safety, sized to the damage
 
@@ -52,11 +58,11 @@ The damage is real and asymmetric: **the portal has no cancel endpoint** (none i
 
 - **Shape 3 + Shape 1 hybrid.** `booking create` is T3: without `--yes` it only previews. With `--yes` it additionally requires `--confirm <intent>` where the intent (`11537@2026-11-06T16x1`) is printed by the preview and binds court, date, hour and duration. Two differently-named flags with a domain-specific value cannot be typed by accident or pattern-filled.
 - **Freshness-bounded preflight, on the real path.** Both preview and live re-read the court's schedule *at that moment*, apply the portal's published rules (`src/idrd/rules.ts`: max 2 continuous hours, 24 h advance, current week only, Monday 9 am opening) and check the session with a live `/api/user` call. Live refuses if any check is red — even with full confirmation.
-- **Audit before, not after.** `beginAudit()` writes a `pending` record before the POST, then `ok`/`error` with the same `audit_id`. Day-bucketed JSONL in `~/.idrd/audit/`, mode 0600, no tokens or PII. A contract test asserts the pending record is on disk at the moment the mock receives the POST.
-- **Killswitch.** `idrd killswitch on` (or `touch ~/.idrd/KILLSWITCH`) blocks every write regardless of flags.
+- **Audit before, not after.** `beginAudit()` writes a `pending` record before the POST, then `ok`/`error` with the same `audit_id`. Day-bucketed JSONL in `~/.cupo/audit/`, mode 0600, no tokens or PII. A contract test asserts the pending record is on disk at the moment the mock receives the POST.
+- **Killswitch.** `cupo killswitch on` (or `touch ~/.cupo/KILLSWITCH`) blocks every write regardless of flags.
 - **Payment stays human.** The CLI never touches card or bank credentials. For paid bookings it returns the PSE `bank_url`; the human pays at their bank. Free bookings are confirmed through `transferBankFree` automatically as part of the same approved intent (that is what the portal's own UI does).
 - **Web client, not hardcoded.** The portal's OAuth password grant needs its public web client id/secret, which every browser receives in `chunk-common.<hash>.js`. The CLI discovers them from that file at login (`src/idrd/webclient.ts`), caches them for 7 days (0600), re-discovers once on `invalid_client` (rotation), and honors `IDRD_CLIENT_ID`/`IDRD_CLIENT_SECRET`. Nothing is republished in this repo.
-- **Secrets.** Password comes from `IDRD_PASSWORD`, `--password-stdin`, or a no-echo TTY prompt; it is never persisted (contract test greps every file under `IDRD_HOME`). Token stored 0600. Without TTY and without a password source, login fails fast with exit 3 — it never hangs.
+- **Secrets.** Password comes from `IDRD_PASSWORD`, `--password-stdin`, or a no-echo TTY prompt; it is never persisted (contract test greps every file under `CUPO_HOME`). Token stored 0600. Without TTY and without a password source, login fails fast with exit 3 — it never hangs.
 - **Untrusted text.** Every upstream string goes through `cleanText` (strips ANSI, control and bidi characters, caps length, repairs double-encoded UTF-8) before it reaches an agent.
 - **Real IP only.** PSE requires the payer's public IP. The portal's SPA falls back to a hardcoded IP when lookup fails; this CLI refuses instead of sending an address that is not the user's.
 
@@ -67,7 +73,7 @@ Registered under `package.json.registries` (no `components.json` created). Insta
 | Block | Decision | Reason |
 |---|---|---|
 | argv | **hybrid** | Adopted, but wrapped: it parses `--json tennis` as `json="tennis"`. `src/core/args.ts` rewrites known boolean flags to `--flag=true` first. |
-| global-flags | **hybrid** | Env vars renamed `CLI_JSON/CLI_PROFILE` → `IDRD_JSON/IDRD_PROFILE` to avoid collisions. |
+| global-flags | **hybrid** | Env vars renamed `CLI_JSON/CLI_PROFILE` → `CUPO_JSON/CUPO_PROFILE` to avoid collisions. |
 | detect | adopt | `detectMode`/`shouldColor` are the single TTY/NO_COLOR decision. |
 | json-mode | **hybrid** | Its `emit()` writes arrays as NDJSON and errors as `{ok,error}`; the published contract here is one envelope object with `nextSteps` inline and `error.code`. Kept transitively (next-steps, trust-ladder depend on it); `src/core/output.ts` owns emission. |
 | next-steps | **hybrid** | Machine mode: steps go inside the envelope (stdout) rather than NDJSON on stderr, per the skill's "nextSteps in structured output". Human mode uses the block; header translated to Spanish. |
@@ -87,8 +93,8 @@ Registered under `package.json.registries` (no `components.json` created). Insta
 | notify-os | reject | No long-running watch command yet. |
 | telemetry | reject | Personal tool; no value and a privacy cost. |
 | api-key-wizard | reject | Auth is an OAuth password grant, not an API key. |
-| skill-installer-prompt | reject | Interactive post-init prompt that changes the user environment; the agent manual ships as `skills/idrd/SKILL.md` instead. |
-| xdg-paths | reject | One local home (`~/.idrd`, overridable with `IDRD_HOME`) is simpler for a single-machine tool. |
+| skill-installer-prompt | reject | Interactive post-init prompt that changes the user environment; the agent manual ships as `skills/cupo/SKILL.md` instead. |
+| xdg-paths | reject | One local home (`~/.cupo`, overridable with `CUPO_HOME`) is simpler for a single-machine tool. |
 
 ## Phase 5: wiring (grep-verified)
 
@@ -102,7 +108,7 @@ Activities are a different object (`/api/citizen-portal/public-schedules`): prog
 
 ## CEFE Chapinero namespace (added 2026-11-04)
 
-A second, unrelated target in the same binary: cefechapinero.com (Next.js SPA over AWS API Gateway, "Infracol"). Contract in `docs/recon-cefe.md`. It lives under `idrd cefe <noun> <verb>` (the command table supports three words) with its own session store (`~/.idrd/cefe/`), `CEFE_PASSWORD`/`CEFE_EMAIL`, and a Bearer token the SPA keeps in localStorage. Availability follows the booking screen: slot list from `/schedules/{poolId}` (override > weekly > default), occupancy from `/pool-slots`, today's past times hidden. Reservations are reversible up to 6 h before start, so `cefe booking create` is **T2** (preview by default, `--yes` to execute) rather than T3; cancel, enrol, class book, tournament register are T2 with `--yes`. Payment never leaves the human: EFECTIVO is paid at the venue, WOMPI on the website, CREDITOS/FREE confirm directly. Account registration demands `--accept-habeas-data`, a consent flag an agent must be told to pass.
+A second, unrelated target in the same binary: cefechapinero.com (Next.js SPA over AWS API Gateway, "Infracol"). Contract in `docs/recon-cefe.md`. It lives under `cupo cefe <noun> <verb>` (the command table supports three words) with its own session store (`~/.cupo/cefe/`), `CEFE_PASSWORD`/`CEFE_EMAIL`, and a Bearer token the SPA keeps in localStorage. Availability follows the booking screen: slot list from `/schedules/{poolId}` (override > weekly > default), occupancy from `/pool-slots`, today's past times hidden. Reservations are reversible up to 6 h before start, so `cefe booking create` is **T2** (preview by default, `--yes` to execute) rather than T3; cancel, enrol, class book, tournament register are T2 with `--yes`. Payment never leaves the human: EFECTIVO is paid at the venue, WOMPI on the website, CREDITOS/FREE confirm directly. Account registration demands `--accept-habeas-data`, a consent flag an agent must be told to pass.
 
 | Command group | Trust | Auth | Notes |
 |---|---|---|---|

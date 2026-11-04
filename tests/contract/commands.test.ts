@@ -9,7 +9,7 @@ afterEach(() => home.cleanup());
 const PASSWORD = "s3cret-Never-On-Disk";
 async function loggedIn() {
   mockPortal();
-  const r = await run(["auth", "login", "--email", "a@b.co", "--json"], { IDRD_PASSWORD: PASSWORD });
+  const r = await run(["idrd", "auth", "login", "--email", "a@b.co", "--json"], { IDRD_PASSWORD: PASSWORD });
   expect(r.code).toBe(0);
 }
 const isEnvelope = (j: any, command: string) => {
@@ -20,12 +20,12 @@ const isEnvelope = (j: any, command: string) => {
 describe("read commands (no auth)", () => {
   test("court list: only bookable by default, text repaired", async () => {
     mockPortal();
-    const r = await run(["court", "list", "--json"]);
+    const r = await run(["idrd", "court", "list", "--json"]);
     expect(r.code).toBe(0);
-    isEnvelope(r.json, "court list");
+    isEnvelope(r.json, "idrd court list");
     expect(r.json.data).toHaveLength(1);
     expect(r.json.data[0]).toMatchObject({ id: 11537, sport: "tennis", bookable: true, description: "CANCHA DE TENNIS N° 1" });
-    const all = await run(["court", "list", "--all", "--json"]);
+    const all = await run(["idrd", "court", "list", "--all", "--json"]);
     expect(all.json.data).toHaveLength(2);
   });
   test("court list reads every page, not just the first 10", async () => {
@@ -35,44 +35,44 @@ describe("read commands (no auth)", () => {
       park_address: "CL 1", locality: i === 36 ? "CHAPINERO" : "SUBA", upz: "X", endowment_description: "CANCHA", for_booking: 1,
     }));
     const calls = mockPortal({ courts, courtPageCap: 10 });
-    const r = await run(["court", "list", "--json"]);
+    const r = await run(["idrd", "court", "list", "--json"]);
     expect(r.code).toBe(0);
     expect(r.json.data).toHaveLength(37);
     expect(calls.filter((c) => c.url.startsWith("/api/parks/tennis-courts")).map((c) => new URL(c.url, "http://x").searchParams.get("page"))).toEqual(["1", "2", "3", "4"]);
-    const last = await run(["court", "list", "--locality", "chapinero", "--json"]);
+    const last = await run(["idrd", "court", "list", "--locality", "chapinero", "--json"]);
     expect(last.json.data.map((c: any) => c.id)).toEqual([20036]);
   });
   test("court list fetches a single large page when the server honours per_page", async () => {
     const courts = Array.from({ length: 88 }, (_, i) => ({ park_endowment_id: 30000 + i, id: 30000 + i, park_id: 1, park_name: `P${i}`, park_code: "x", park_address: "y", locality: "L", upz: "U", endowment_description: "C", for_booking: 1 }));
     const calls = mockPortal({ courts });
-    const r = await run(["court", "list", "--json"]);
+    const r = await run(["idrd", "court", "list", "--json"]);
     expect(r.json.data).toHaveLength(88);
     expect(calls.filter((c) => c.url.startsWith("/api/parks/tennis-courts"))).toHaveLength(1);
   });
   test("slot list subtracts reservations", async () => {
     mockPortal();
-    const r = await run(["slot", "list", "11537", "--date", "2026-11-05", "--json"]);
-    isEnvelope(r.json, "slot list");
+    const r = await run(["idrd", "slot", "list", "11537", "--date", "2026-11-05", "--json"]);
+    isEnvelope(r.json, "idrd slot list");
     expect(r.json.data.slots.map((s: any) => [s.hour, s.available])).toEqual([[6, false], [7, true], [16, true], [17, true], [18, true]]);
     expect(r.json.data.freeRuns).toEqual([[7], [16, 17, 18]]);
     expect(r.json.nextSteps[0].command).toContain("booking create 11537 --date 2026-11-05 --hour 7");
   });
   test("find scans courts and honours the window", async () => {
     mockPortal();
-    const r = await run(["find", "--date", "2026-11-05", "--from", "6", "--to", "9", "--json"]);
-    isEnvelope(r.json, "slot find");
+    const r = await run(["idrd", "find", "--date", "2026-11-05", "--from", "6", "--to", "9", "--json"]);
+    isEnvelope(r.json, "idrd slot find");
     expect(r.json.data.results).toHaveLength(1);
     expect(r.json.data.results[0].freeHours).toEqual([7]);
   });
   test("court get merges schedule details and park info", async () => {
     mockPortal();
-    const r = await run(["court", "get", "11537", "--json"]);
+    const r = await run(["idrd", "court", "get", "11537", "--json"]);
     expect(r.json.data.endowment).toMatchObject({ kind: "TENNIS", surface: "ASFALTO" });
     expect(r.json.data.park.hours).toContain("6 AM");
   });
   test("pay banks hides the placeholder entry", async () => {
     mockPortal();
-    const r = await run(["pay", "banks", "--json"]);
+    const r = await run(["idrd", "pay", "banks", "--json"]);
     expect(r.json.data).toEqual([{ code: "1007", name: "BANCOLOMBIA" }]);
   });
 });
@@ -89,26 +89,26 @@ describe("auth", () => {
   });
   test("login without TTY and without IDRD_PASSWORD fails fast instead of prompting", async () => {
     mockPortal();
-    const r = await run(["auth", "login", "--email", "a@b.co", "--json", "--no-input"], { IDRD_PASSWORD: undefined });
+    const r = await run(["idrd", "auth", "login", "--email", "a@b.co", "--json", "--no-input"], { IDRD_PASSWORD: undefined });
     expect(r.code).toBe(3);
     expect(r.json.error.code).toBe("auth/password-required");
   });
   test("bad credentials map to auth exit code", async () => {
     mockPortal({ loginStatus: 401 });
-    const r = await run(["auth", "login", "--email", "a@b.co", "--json"], { IDRD_PASSWORD: "x" });
+    const r = await run(["idrd", "auth", "login", "--email", "a@b.co", "--json"], { IDRD_PASSWORD: "x" });
     expect(r.code).toBe(3);
     expect(r.json.error.code).toBe("auth/invalid-credentials");
   });
   test("status makes a live call", async () => {
     await loggedIn();
     const calls = mockPortal();
-    const r = await run(["auth", "status", "--json"]);
+    const r = await run(["idrd", "auth", "status", "--json"]);
     expect(r.json.data).toMatchObject({ loggedIn: true, email: "a@b.co", refreshable: true });
     expect(calls.some((c) => c.url === "/api/user" && c.auth === "Bearer tok-abc")).toBe(true);
   });
   test("authed commands without a session exit 3", async () => {
     mockPortal();
-    const r = await run(["booking", "list", "--json"]);
+    const r = await run(["idrd", "booking", "list", "--json"]);
     expect(r.code).toBe(3);
   });
 });
@@ -116,7 +116,7 @@ describe("auth", () => {
 describe("web client discovery", () => {
   test("discovers the portal's web client from its frontend, caches it 0600, reuses the cache", async () => {
     const calls = mockPortal();
-    const r1 = await run(["auth", "login", "--email", "a@b.co", "--json"], { IDRD_PASSWORD: PASSWORD });
+    const r1 = await run(["idrd", "auth", "login", "--email", "a@b.co", "--json"], { IDRD_PASSWORD: PASSWORD });
     expect(r1.code).toBe(0);
     expect(calls.filter((c) => c.url.startsWith("/js/chunk-common")).length).toBe(1);
     expect(calls.some((c) => c.url.includes("chunk-vendors"))).toBe(false);
@@ -124,27 +124,27 @@ describe("web client discovery", () => {
     const cache = allFiles(home.dir).find((f) => f.endsWith("web-client.json"))!;
     expect(statSync(cache).mode & 0o777).toBe(0o600);
     const calls2 = mockPortal();
-    await run(["auth", "login", "--email", "a@b.co", "--json"], { IDRD_PASSWORD: PASSWORD });
+    await run(["idrd", "auth", "login", "--email", "a@b.co", "--json"], { IDRD_PASSWORD: PASSWORD });
     expect(calls2.some((c) => c.url === "/" || c.url.startsWith("/js/"))).toBe(false);
   });
   test("IDRD_CLIENT_ID/SECRET override discovery", async () => {
     const calls = mockPortal({ acceptSecret: "from-env" });
-    const r = await run(["auth", "login", "--email", "a@b.co", "--json"], { IDRD_PASSWORD: PASSWORD, IDRD_CLIENT_ID: "2", IDRD_CLIENT_SECRET: "from-env" });
+    const r = await run(["idrd", "auth", "login", "--email", "a@b.co", "--json"], { IDRD_PASSWORD: PASSWORD, IDRD_CLIENT_ID: "2", IDRD_CLIENT_SECRET: "from-env" });
     expect(r.code).toBe(0);
     expect(calls.some((c) => c.url === "/")).toBe(false);
   });
   test("a rotated client (invalid_client) is re-discovered once, then login succeeds", async () => {
     mockPortal({ webSecret: "old-secret" });
-    await run(["auth", "login", "--email", "a@b.co", "--json"], { IDRD_PASSWORD: PASSWORD });
+    await run(["idrd", "auth", "login", "--email", "a@b.co", "--json"], { IDRD_PASSWORD: PASSWORD });
     const calls = mockPortal({ webSecret: "new-secret" }); // cache still holds old-secret
-    const r = await run(["auth", "login", "--email", "a@b.co", "--json"], { IDRD_PASSWORD: PASSWORD });
+    const r = await run(["idrd", "auth", "login", "--email", "a@b.co", "--json"], { IDRD_PASSWORD: PASSWORD });
     expect(r.code).toBe(0);
     expect(calls.filter((c) => c.url === "/oauth/token").map((c) => (c.body as any).client_secret)).toEqual(["old-secret", "new-secret"]);
   });
 });
 
 describe("booking create safety", () => {
-  const BASE = ["booking", "create", "11537", "--date", "2026-11-05", "--hour", "16", "--json"];
+  const BASE = ["idrd", "booking", "create", "11537", "--date", "2026-11-05", "--hour", "16", "--json"];
   const INTENT = "11537@2026-11-05T16x1";
 
   test("without --yes it is a preview and never POSTs", async () => {
@@ -177,7 +177,7 @@ describe("booking create safety", () => {
   test("an occupied hour is refused even with full confirmation", async () => {
     await loggedIn();
     const calls = mockPortal();
-    const r = await run(["booking", "create", "11537", "--date", "2026-11-05", "--hour", "6", "--json", "--yes", "--confirm", "11537@2026-11-05T06x1"]);
+    const r = await run(["idrd", "booking", "create", "11537", "--date", "2026-11-05", "--hour", "6", "--json", "--yes", "--confirm", "11537@2026-11-05T06x1"]);
     expect(r.code).toBe(5);
     expect(r.json.error.code).toBe("slot/unavailable");
     expect(calls.some((c) => c.url.endsWith("/payment"))).toBe(false);
@@ -185,7 +185,7 @@ describe("booking create safety", () => {
   test("portal rules are enforced before any call (3 hours)", async () => {
     await loggedIn();
     mockPortal();
-    const r = await run(["booking", "create", "11537", "--date", "2026-11-05", "--hour", "16", "--hours", "3", "--json", "--yes", "--confirm", "11537@2026-11-05T16x3"]);
+    const r = await run(["idrd", "booking", "create", "11537", "--date", "2026-11-05", "--hour", "16", "--hours", "3", "--json", "--yes", "--confirm", "11537@2026-11-05T16x3"]);
     expect(r.code).toBe(2);
     expect(r.json.error.code).toBe("rule/violation");
   });
@@ -230,14 +230,14 @@ describe("booking create safety", () => {
     mockPortal({ amount: 12000 });
     const r = await run([...BASE, "--yes", "--confirm", INTENT]);
     expect(r.json.data.payment).toBeNull();
-    expect(r.json.nextSteps.map((s: any) => s.command).join(" ")).toContain("idrd pay pse 555");
-    const noYes = await run(["pay", "pse", "555", "--bank", "1007", "--json"]);
+    expect(r.json.nextSteps.map((s: any) => s.command).join(" ")).toContain("cupo idrd pay pse 555");
+    const noYes = await run(["idrd", "pay", "pse", "555", "--bank", "1007", "--json"]);
     expect(noYes.code).toBe(5);
     expect(noYes.json.error.code).toBe("approval/required");
-    const preview = await run(["pay", "pse", "555", "--bank", "1007", "--dry-run", "--json"]);
+    const preview = await run(["idrd", "pay", "pse", "555", "--bank", "1007", "--dry-run", "--json"]);
     expect(preview.code).toBe(0);
     expect(preview.json.data).toMatchObject({ dryRun: true, amount: 12000, bank: "1007" });
-    const ok = await run(["pay", "pse", "555", "--bank", "1007", "--yes", "--json"]);
+    const ok = await run(["idrd", "pay", "pse", "555", "--bank", "1007", "--yes", "--json"]);
     expect(ok.json.data.bankUrl).toContain("pse.example");
   });
   test("if confirmation fails after the booking exists, the booking id is still reported", async () => {
@@ -247,12 +247,12 @@ describe("booking create safety", () => {
     expect(r.code).toBe(0);
     expect(r.json.data.booking.bookingId).toBe("555");
     expect(r.json.data.payment).toMatchObject({ ok: false, error: { code: "upstream/error" } });
-    expect(r.json.nextSteps[0].command).toBe("idrd pay pse 555 --yes");
+    expect(r.json.nextSteps[0].command).toBe("cupo idrd pay pse 555 --yes");
   });
   test("pay pse for an unknown booking is not-found", async () => {
     await loggedIn();
     mockPortal();
-    const r = await run(["pay", "pse", "999", "--bank", "1007", "--yes", "--json"]);
+    const r = await run(["idrd", "pay", "pse", "999", "--bank", "1007", "--yes", "--json"]);
     expect(r.code).toBe(4);
   });
 });
@@ -261,7 +261,7 @@ describe("surface", () => {
   test("schema is versioned and lists every command", async () => {
     const r = await run(["schema", "--json"]);
     expect(r.json.data.schemaVersion).toBe(1);
-    expect(r.json.data.commands.map((c: any) => c.name)).toContain("booking create");
+    expect(r.json.data.commands.map((c: any) => c.name)).toContain("idrd booking create");
     expect(r.json.data.exitCodes.refused).toBe(5);
   });
   test("unknown command is a usage error", async () => {
@@ -270,7 +270,7 @@ describe("surface", () => {
     expect(r.json.ok).toBe(false);
   });
   test("command --help in JSON returns the spec", async () => {
-    const r = await run(["booking", "create", "--help", "--json"]);
-    expect(r.json.data).toMatchObject({ name: "booking create", trust: "T3" });
+    const r = await run(["idrd", "booking", "create", "--help", "--json"]);
+    expect(r.json.data).toMatchObject({ name: "idrd booking create", trust: "T3" });
   });
 });

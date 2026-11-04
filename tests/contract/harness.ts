@@ -1,7 +1,7 @@
 import { mkdtempSync, readdirSync, readFileSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { setFetch } from "../../src/core/http.ts";
+import { setFetch, type FetchLike } from "../../src/core/http.ts";
 import { setNow } from "../../src/idrd/time.ts";
 import { main } from "../../src/cli.ts";
 
@@ -143,8 +143,22 @@ export type CefeScenario = {
 
 export function mockCefe(sc: CefeScenario = {}) {
   const calls: Call[] = [];
+  setFetch(cefeFetch(sc, calls));
+  return calls;
+}
+
+/** Both backends at once, routed by host: the `find`/`book`/`providers` job commands talk to both. */
+export function mockAll(scPortal: Scenario = {}, scCefe: CefeScenario = {}) {
+  const calls: Call[] = [];
+  const portal = portalFetch(scPortal, calls);
+  const cefe = cefeFetch(scCefe, calls);
+  setFetch(async (input, init) => (new URL(String(input)).host.includes("execute-api") ? cefe(input, init) : portal(input, init)));
+  return calls;
+}
+
+function cefeFetch(sc: CefeScenario, calls: Call[]): FetchLike {
   const user = { ...CEFE_USER, ...(sc.user ?? {}) };
-  setFetch(async (input, init) => {
+  return async (input, init) => {
     const url = new URL(String(input));
     const method = init?.method ?? "GET";
     const body = init?.body ? JSON.parse(String(init.body)) : undefined;
@@ -196,13 +210,17 @@ export function mockCefe(sc: CefeScenario = {}) {
     if (p === "/tournaments/my-registrations") return json(200, { data: [] });
     if (p === "/users/u-1/promotions") return json(200, []);
     return json(404, { message: "Not found" });
-  });
-  return calls;
+  };
 }
 
 export function mockPortal(sc: Scenario = {}) {
   const calls: Call[] = [];
-  setFetch(async (input, init) => {
+  setFetch(portalFetch(sc, calls));
+  return calls;
+}
+
+function portalFetch(sc: Scenario, calls: Call[]): FetchLike {
+  return async (input, init) => {
     const url = new URL(String(input));
     const method = init?.method ?? "GET";
     const body = init?.body ? JSON.parse(String(init.body)) : undefined;
@@ -295,8 +313,7 @@ export function mockPortal(sc: Scenario = {}) {
     if (p === "/api/payment-gateway/transferBankFree") return sc.transferStatus ? json(sc.transferStatus, { message: "PSE caído" }) : json(200, { data: { payment: "FREE-1" } });
     if (p === "/api/payment-gateway/transferBank") return json(200, { data: { bank_url: "https://pse.example/pay?ref=PAY-1", payment: "PAY-1" } });
     return new Response("<html>404</html>", { status: 404 });
-  });
-  return calls;
+  };
 }
 
 export type Run = { code: number; stdout: string; stderr: string; json: any };

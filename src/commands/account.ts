@@ -8,7 +8,10 @@ import { SCHEMA_VERSION } from "../core/output.js";
 import { listBookings, listCourts, logout, me, paymentHistory, pendingToPay } from "../idrd/api.js";
 import { accessToken, currentSession, login, logoutLocal, resolvePassword, storedEmail } from "../idrd/auth.js";
 import { localBookings } from "../idrd/payment.js";
-import { COMMANDS, GLOBAL_FLAGS } from "../registry.js";
+import { COMMANDS, GLOBAL_FLAGS, providerOf } from "../registry.js";
+import { PROVIDERS } from "./jobs.js";
+import { currentSession as cefeSession } from "../cefe/auth.js";
+import { listPools as cefeListPools } from "../cefe/api.js";
 import type { Ctx } from "./context.js";
 
 import pkg from "../../package.json";
@@ -26,7 +29,7 @@ export async function authLogin(ctx: Ctx) {
   return {
     data,
     human: () => `${ok("✓")} Sesión iniciada como ${bold(email)}${user ? ` (${user.name})` : ""}\n  ${muted(`Vence: ${session.expiresAt}`)}`,
-    nextSteps: [{ command: "idrd find --date mañana --from 6 --to 9", description: "buscar canchas libres" }],
+    nextSteps: [{ command: "cupo idrd find --date mañana --from 6 --to 9", description: "buscar canchas libres" }],
   };
 }
 
@@ -35,8 +38,8 @@ export async function authStatus(ctx: Ctx) {
   if (!s) {
     return {
       data: { loggedIn: false, email: storedEmail(ctx.flags.profile) ?? null },
-      human: () => `${warn("○")} Sin sesión. Corre ${bold("idrd auth login --email <correo>")}`,
-      nextSteps: [{ command: "idrd auth login --email <correo>", description: "iniciar sesión" }],
+      human: () => `${warn("○")} Sin sesión. Corre ${bold("cupo idrd auth login --email <correo>")}`,
+      nextSteps: [{ command: "cupo idrd auth login --email <correo>", description: "iniciar sesión" }],
     };
   }
   const expired = s.expiresAt ? Date.parse(s.expiresAt) < Date.now() : false;
@@ -90,7 +93,7 @@ export async function payPending(ctx: Ctx) {
   return {
     data: items,
     human: () => (items.length === 0 ? `${ok("✓")} No tienes pagos pendientes.` : `${bold(`Pagos pendientes: ${items.length}`)}\n${items.map((i) => `  • ${JSON.stringify(i).slice(0, 160)}`).join("\n")}`),
-    nextSteps: items.length ? [{ command: "idrd pay pse <bookingId> --bank <código> --yes", description: "pagar una reserva creada desde este equipo" }] : [],
+    nextSteps: items.length ? [{ command: "cupo idrd pay pse <bookingId> --bank <código> --yes", description: "pagar una reserva creada desde este equipo" }] : [],
   };
 }
 
@@ -113,14 +116,23 @@ export async function doctor(ctx: Ctx) {
     async () => {
       const t0 = Date.now();
       const courts = await listCourts("tennis");
-      return { name: "portal-publico", ok: courts.length > 0, detail: `${courts.length} canchas de tenis · ${Date.now() - t0} ms` };
+      return { name: "idrd-publico", ok: courts.length > 0, detail: `${courts.length} canchas de tenis · ${Date.now() - t0} ms` };
+    },
+    async () => {
+      const t0 = Date.now();
+      const pools = await cefeListPools();
+      return { name: "cefe-publico", ok: pools.length > 0, detail: `${pools.length} piscinas · ${Date.now() - t0} ms` };
+    },
+    async () => {
+      const s = cefeSession(ctx.flags.profile);
+      return { name: "cefe-sesion", ok: true, detail: s ? `${s.email} · vence ${s.expiresAt}` : "sin sesión (solo lectura disponible)" };
     },
     async () => {
       const s = currentSession(ctx.flags.profile);
-      if (!s) return { name: "sesion", ok: true, detail: "sin sesión (solo lectura disponible)" };
+      if (!s) return { name: "idrd-sesion", ok: true, detail: "sin sesión (solo lectura disponible)" };
       const { token, refreshed } = await accessToken(ctx.flags.profile);
       const u = await me(token);
-      return { name: "sesion", ok: true, detail: `${u.email} · vence ${s.expiresAt}${refreshed ? " · renovada" : ""}` };
+      return { name: "idrd-sesion", ok: true, detail: `${u.email} · vence ${s.expiresAt}${refreshed ? " · renovada" : ""}` };
     },
     async () => {
       const k = getKillswitchState(appHome());
@@ -140,7 +152,7 @@ export async function killswitch(ctx: Ctx) {
   const action = positional(ctx.args, 0, "on|off|status");
   if (action === "on") turnKillswitchOn(appHome(), str(ctx.args, "reason") ?? "manual");
   else if (action === "off") turnKillswitchOff(appHome());
-  else if (action !== "status") fail("usage/bad-arg", "Usa: idrd killswitch on|off|status");
+  else if (action !== "status") fail("usage/bad-arg", "Usa: cupo killswitch on|off|status");
   const state = getKillswitchState(appHome());
   return {
     data: state,
@@ -151,26 +163,33 @@ export async function killswitch(ctx: Ctx) {
 export async function schema() {
   const data = {
     schemaVersion: SCHEMA_VERSION,
-    cli: "idrd",
+    cli: "cupo",
     version: VERSION,
     envelope: {
       success: "{ok:true, schemaVersion, command, data, nextSteps[], meta?}",
       error: "{ok:false, schemaVersion, command, error:{code, message, hint?}}",
     },
     exitCodes: { ok: 0, unknown: 1, usage: 2, auth: 3, notFound: 4, refused: 5, upstream: 6 },
-    env: ["IDRD_PASSWORD", "IDRD_EMAIL", "IDRD_PROFILE", "IDRD_HOME", "IDRD_JSON", "NO_COLOR"],
+    env: ["CUPO_HOME", "CUPO_PROFILE", "CUPO_JSON", "IDRD_PASSWORD", "IDRD_EMAIL", "CEFE_PASSWORD", "CEFE_EMAIL", "NO_COLOR"],
     globalFlags: GLOBAL_FLAGS,
-    commands: COMMANDS,
+    /** Start here: the job, then the map, then the provider detail. */
+    start: ["cupo providers", "cupo find --sport pool --date sab", "cupo book <id de find>"],
+    providers: PROVIDERS.map((p) => ({ id: p.id, name: p.name, web: p.web, covers: p.covers, sports: p.sports, login: p.login })),
+    commands: COMMANDS.map((c) => ({ ...c, provider: providerOf(c.name) })),
   };
   return { data, human: () => JSON.stringify(data, null, 2) };
 }
 
 export function helpText(): string {
-  const lines = [bold("idrd") + dim(" — CLI no oficial del Portal Ciudadano IDRD (Bogotá)"), "", bold("Comandos:")];
+  const lines = [bold("cupo") + dim(" — consigue cupo para hacer deporte en Bogotá (IDRD + CEFE Chapinero), no oficial"), "", bold("Comandos:")];
   const w = Math.max(...COMMANDS.map((c) => c.name.length)) + 1;
-  for (const c of COMMANDS) lines.push(`  ${c.name.padEnd(w)} ${c.summary}${c.trust === "T3" ? warn("  [irreversible]") : ""}`);
+  const groups: Array<[string, string]> = [["cupo", "El job (todos los proveedores)"], ["idrd", "IDRD · Portal Ciudadano"], ["cefe", "CEFE Chapinero"]];
+  for (const [g, title] of groups) {
+    lines.push("", dim(`# ${title}`));
+    for (const c of COMMANDS.filter((x) => providerOf(x.name) === g)) lines.push(`  ${c.name.padEnd(w)} ${c.summary}${c.trust === "T3" ? warn("  [irreversible]") : ""}`);
+  }
   lines.push("", bold("Globales:"), ...GLOBAL_FLAGS.map((f) => `  ${f.flag.padEnd(20)} ${f.description}`));
-  lines.push("", dim("Detalle de un comando: idrd <comando> --help · Contrato para agentes: idrd schema"));
+  lines.push("", dim("Detalle de un comando: idrd <comando> --help · Contrato para agentes: cupo schema"));
   return lines.join("\n");
 }
 
@@ -178,7 +197,7 @@ export function commandHelp(name: string): string {
   const c = COMMANDS.find((x) => x.name === name)!;
   const args = (c.args ?? []).map((a) => `<${a.name}>`).join(" ");
   return [
-    `${bold(`idrd ${c.name}`)} ${args}`,
+    `${bold(`cupo ${c.name}`)} ${args}`,
     c.summary,
     ...(c.args?.length ? ["", bold("Argumentos:"), ...c.args.map((a) => `  <${a.name}>  ${a.description}`)] : []),
     ...(c.flags?.length ? ["", bold("Flags:"), ...c.flags.map((f) => `  ${f.flag.padEnd(34)} ${f.description}`)] : []),
