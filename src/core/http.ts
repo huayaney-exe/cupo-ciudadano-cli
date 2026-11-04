@@ -13,7 +13,7 @@ export const HOSTS = {
 const UA = "idrd-cli/0.1 (+personal, unofficial)";
 
 export type RequestOptions = {
-  method?: "GET" | "POST" | "PUT";
+  method?: "GET" | "POST" | "PUT" | "DELETE";
   body?: unknown;
   token?: string;
   query?: Record<string, string | number | undefined>;

@@ -9,7 +9,7 @@ The CLI wraps a system we do not control (IDRD Portal Ciudadano). Recon ran firs
 - Audience: the owner and the owner's agents, on one Mac. Not published.
 - Written against Node's API surface only (`fs`, `path`, `os`, `crypto`, global `fetch`), so the target is a build decision.
 - `bun build --target=node` → `dist/idrd.js` with a `#!/usr/bin/env node` shebang, so installing does not require Bun (the corpus failure the skill warns about). Bun is a dev tool only (build + tests).
-- **The built bundle is committed** (`dist/idrd.js`, ~92 KB, dependencies inlined). Install is `git clone` + `npm link` with only Node: no Bun, no build step. The first README said "no Bun needed" while its install block ran `bun install && bun run build` — contradicted by the instructions themselves. Trade-off: `dist/` can drift from `src/`; `bun run verify:dist` rebuilds and fails if the committed bundle differs.
+- **The built bundle is committed** (`dist/idrd.js`, ~146 KB, dependencies inlined). Install is `git clone` + `npm link` with only Node: no Bun, no build step. The first README said "no Bun needed" while its install block ran `bun install && bun run build` — contradicted by the instructions themselves. Trade-off: `dist/` can drift from `src/`; `bun run verify:dist` rebuilds and fails if the committed bundle differs.
 - Install: `git clone … && cd portal-ciudadano-cli && npm link`.
 
 ## Phase 2: command surface
@@ -18,11 +18,19 @@ Noun-verb, English verbs agents already know (`list`, `get`, `create`), Spanish 
 
 | Command | Trust | Auth | Notes |
 |---|---|---|---|
-| `court list` / `court get` | T0 | no | public |
-| `slot list` / `slot find` (`find`) | T0 | no | availability = reservable − reserved |
+| `court list` / `court get` / `court lanes` / `court sports` | T0 | no | public; 9 space kinds (5 court sports, pools, grills, gyms, coliseums), every page |
+| `slot list` / `slot find` (`find`) | T0 | no | availability = reservable − reserved; pools per lane with places; grills as blocks; coliseums per sport |
 | `auth login` / `status` / `logout` | T1/T0/T1 | — | OAuth password grant, 8 h token, refresh token |
 | `booking list` | T0 | yes | portal + local ledger |
-| `booking create` | **T3** | yes | preview by default; `--yes --confirm <intent>` to execute; **irreversible** |
+| `booking create` | **T3** | yes | preview by default; `--yes --confirm <intent>` to execute; **irreversible**. Intent binds space, date, hour, duration, lane and sport |
+| `pay pending` / `pay history` | T0 | yes | account payments |
+| `gym status` / `quote` / `availability` / `active` | T0 | yes | CEFE gym membership reads |
+| `gym buy` | **T3** | yes | creates the membership and the PSE order; `--yes --confirm gym<id>@membership` |
+| `gym activate` | T2 | yes | posts the approved payment code |
+| `activity list` / `get` / `programs` / `stages` / `categories` | T0 | no | schools and programs, every page |
+| `activity mine` / `profile list` | T0 | yes | |
+| `activity subscribe` | T2 (gated like T3) | yes | enrols a profile; accepts the activity's consents; reversible |
+| `activity unsubscribe` | T2 | yes | |
 | `pay banks` | T0 | no | public |
 | `pay pse` | **T2** | yes | creates the PSE order, returns `bank_url`; `--yes` required |
 | `pay status` | T0 | yes | |
@@ -86,9 +94,16 @@ Registered under `package.json.registries` (no `components.json` created). Insta
 
 Every adopted symbol has a call site outside `src/cli/` (checked with grep on 2026-11-03): `parseArgv`, `parseGlobalFlags`, `detectMode`, `emitNextSteps`, `approveGate` ×2, `beginAudit`, `loadSession`/`saveSession`/`clearSession`, `loadConfig`/`saveConfig`, `AppError`, `runDoctor`, `promptSecret`, `shouldColor`, `printBanner`, `openUrl`, `getKillswitchState`, `turnKillswitchOn/Off`, `atomicWriteJson`, `visibleWidth`/`padVisible`/`truncateVisible`.
 
+## Space kinds (added 2026-11-03, evening)
+
+The portal's booking screen decides its form from `details.details.endowment`: `PISCINA` → pool (lane required, `quota`/`used_quota` per hour, CEFE pools take a beneficiary document and a responsible adult), `ASADERO` → grill (one published block per day), `OTRO(MÓDULO)` → gym (places per hour, or membership), `POLIDEPORTIVO` → coliseum (`sport_id` in the calendar query and the booking). `src/idrd/sports.ts` encodes the same mapping (`sportFromEndowment`) so `booking create` never needs to be told the kind. Capacity spaces reuse the reservable-minus-reserved difference: the server flips a full hour to `can:false` and keeps the numbers, which `hourSlots` carries through. Rules: the 2 h / 24 h prose rules apply to courts only; other kinds must fit inside one published block (`checkBookingRules({court:false, maxHours})`).
+
+Activities are a different object (`/api/citizen-portal/public-schedules`): programs × stages × schedules with quotas, ages, price and consents. The portal filters by `program_id[]`/`stage_id[]`; everything else is filtered client-side after reading every page. Enrolment is `POST /api/profiles/{profileId}/schedules/{activityId}` with `{profile_id, terms, consent[]}`; removal is `DELETE /api/profiles/subscriptions/{id}`. `--person` (not `--profile`, which is the global account flag) names the profile.
+
 ## Verified vs unverified
 
-**Verified live (anonymous):** web-client discovery from the portal frontend, court lists for all 5 sports, park details, endowment details, schedules and the reservable-minus-reserved computation, PSE banks, error mapping (404 → exit 4).
+
+**Verified live (anonymous), 2026-11-03:** web-client discovery from the portal frontend; lists for all 9 kinds read in full through the Laravel paginator (`per_page`/`meta.last_page`): 320 courts (167 reservable), 12 pools (10), 35 grills (31), 5 gyms, 4 coliseums; pool lanes and per-lane calendars with quotas (37 lanes scanned in one `find`); grill blocks; coliseum sports and calendars with `sport_id`; gym hourly quotas; activities (74, 2 pages), programs, stages, categories, activity detail; park and endowment details; the reservable-minus-reserved computation; PSE banks; error mapping (404 → exit 4). Gym membership, profiles, subscriptions and payments endpoints answer 401 anonymously, as expected.
 
 **Verified live with the owner's account (2026-11-03, pure HTTP, before this build):** password grant (8 h + refresh token), `/api/user`, `/api/citizen-portal/bookings`.
 
@@ -98,5 +113,8 @@ Every adopted symbol has a call site outside `src/cli/` (checked with grep on 20
 - The refresh grant (standard Passport; the SPA never uses it).
 - Booking for non-tennis scenarios (synthetic fields may route through the legacy SIM system).
 - The 4 h/week cap across the whole park system is not checked client-side (needs the shape of a non-empty `bookings` response).
+- Gym membership: `status`/`quote`/`availability` response fields (`active`, `ends_at`, `amount`, `valid_from`, `valid_to`, `park_id`, `service_id`, `concept`, `availability[]`) and the purchase flow (`{init:true}` → `membership_id`; PSE payload with `membership_id` and no `reservationId`; `{payment_code}` to activate), all read from the SPA.
+- Activities: `/api/profiles/list` and `/api/profiles/subscriptions` shapes, the subscribe body, and the DELETE.
+- `/api/citizen-portal/pending-to-pay` and `/api/citizen-portal/payments` shapes (returned raw).
 
 All of these are covered by contract tests against a mock that mirrors the observed shapes. The first real booking will confirm them; see `README.md` → "Primera reserva real".

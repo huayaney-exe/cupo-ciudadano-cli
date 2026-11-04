@@ -1,11 +1,11 @@
 # idrd
 
-**Las canchas públicas de Bogotá desde la terminal.** Busca horas libres de tenis, pádel, pickleball y fútbol en los parques del IDRD, revisa una cancha y resérvala con tu cuenta del [Portal Ciudadano](https://portalciudadano.idrd.gov.co). Funciona para personas y para agentes de IA.
+**Los parques públicos de Bogotá desde la terminal.** Todo lo que se reserva en el [Portal Ciudadano](https://portalciudadano.idrd.gov.co) del IDRD: canchas de tenis, pádel, pickleball y fútbol, piscinas por carril, asadores, gimnasios CEFE (por hora o mensualidad) y coliseos; además las escuelas y programas deportivos con inscripción, y los pagos de tu cuenta. Busca horas libres, revisa un espacio y resérvalo con tu cuenta. Funciona para personas y para agentes de IA.
 
 ```text
 $ idrd find --date vie
 
-Tenis · 2026-11-06 · todo el día · 7 canchas revisadas
+Tenis · 2026-11-06 · todo el día · 45 canchas revisadas
 
 ID     Parque            Localidad  Libre
 ─────  ────────────────  ─────────  ───────────────
@@ -128,23 +128,40 @@ idrd pay pse <id-de-la-reserva> --bank 1007 --yes
 
 ## Comandos
 
+Tipos de espacio (`--sport`): `tennis`, `padel`, `pickleball`, `synthetic`, `natural`, `pool`, `grill`, `gym`, `coliseum` (también en español: `piscina`, `asador`, `gimnasio`, `coliseo`).
+
 | Comando | Qué hace | ¿Cuenta? |
 |---|---|---|
-| `idrd find` | Busca horas libres en todas las canchas de un deporte | No |
-| `idrd slot list <cancha>` | Horas de una cancha en una fecha, libres y reservadas | No |
-| `idrd court list` | Lista las canchas reservables de un deporte | No |
-| `idrd court get <cancha>` | Dirección, horario del parque, superficie y reglas de uso | No |
+| `idrd find` | Busca horas libres en todos los espacios de un tipo (piscinas: carril por carril, con cupos) | No |
+| `idrd slot list <id>` | Horas de un espacio en una fecha: libres, reservadas, cupos o bloques | No |
+| `idrd court list` | Lista los espacios reservables de un tipo (lee todas las páginas del portal) | No |
+| `idrd court get <id>` | Tipo, dirección, horario del parque, superficie, reglas; carriles o deportes | No |
+| `idrd court lanes <piscina>` / `court sports <coliseo>` | Carriles de una piscina / deportes de un coliseo | No |
 | `idrd auth login` / `status` / `logout` | Iniciar sesión, ver el estado, cerrar sesión | — |
-| `idrd booking create <cancha>` | Vista previa de la reserva, o reserva real con `--yes --confirm` | Sí |
+| `idrd booking create <id>` | Vista previa de la reserva, o reserva real con `--yes --confirm` (`--lane` piscinas, `--sport-id` coliseos, `--document` y `--adult-*` para CEFE) | Sí |
 | `idrd booking list` | Tus reservas | Sí |
-| `idrd pay banks` | Bancos disponibles en PSE | No |
-| `idrd pay pse <reserva>` | Link de pago PSE de una reserva | Sí |
-| `idrd pay status <código>` | Estado de un pago | Sí |
+| `idrd pay banks` / `pay pse <reserva>` / `pay status <código>` | Bancos PSE, link de pago, estado de un pago | No / Sí / Sí |
+| `idrd pay pending` / `pay history` | Pagos pendientes e historial de tu cuenta | Sí |
+| `idrd gym status` / `quote` / `availability` / `active` | Mensualidad de un gimnasio CEFE: estado, precio y vigencia, cupos | Sí |
+| `idrd gym buy <gimnasio>` / `gym activate` | Compra la mensualidad (vista previa, luego `--yes --confirm`) y la activa tras pagar | Sí |
+| `idrd activity list` | Escuelas y programas con inscripción; filtros por programa, sede, texto, edad, costo y cupos | No |
+| `idrd activity get` / `programs` / `stages` / `categories` | Detalle, programas, sedes (los CEFE son sedes), categorías | No |
+| `idrd profile list` / `activity mine` | Perfiles de tu cuenta (titular y beneficiarios) e inscripciones | Sí |
+| `idrd activity subscribe <actividad> --person <perfil>` / `unsubscribe` | Inscribe un perfil (vista previa, luego `--yes --confirm`) o retira la inscripción | Sí |
 | `idrd doctor` | Diagnóstico del entorno y la conexión | No |
-| `idrd killswitch on` / `off` | Bloquea o desbloquea toda reserva y pago | No |
+| `idrd killswitch on` / `off` | Bloquea o desbloquea toda escritura (reservas, pagos, inscripciones) | No |
 | `idrd schema` | Contrato completo en JSON, para agentes | No |
 
 Ayuda de cualquier comando: `idrd <comando> --help`.
+
+```bash
+idrd find --sport piscina --date sab --from 6 --to 10   # cupos en todas las piscinas, carril por carril
+idrd find --sport asador --date dom                     # asadores libres (bloque de día completo)
+idrd slot list 16893 --lane 3 --date sab                # piscina CEFE San Cristóbal, carril 3
+idrd slot list 16892 --sport-id 3 --date sab            # coliseo, baloncesto
+idrd activity list --available --age 8 --free           # escuelas con cupo para un niño de 8 años
+idrd activity list --stage 3                            # actividades del CEFE San Cristóbal
+```
 
 **Opciones frecuentes**
 
@@ -152,10 +169,13 @@ Ayuda de cualquier comando: `idrd <comando> --help`.
 |---|---|---|
 | `--date` | `2026-11-06`, `hoy`, `mañana`, `lun`, `mar`, `mie`, `jue`, `vie`, `sab`, `dom` | hoy (en `find`, mañana) |
 | `--hour`, `--from`, `--to` | `6`, `6am`, `"6:00 AM"`, `18`, `6pm` | todo el día |
-| `--sport` | `tennis`, `padel`, `pickleball`, `synthetic`, `natural` | `tennis` |
-| `--hours` | `1` o `2` (el portal permite máximo 2 seguidas) | `1` |
+| `--sport` | `tennis`, `padel`, `pickleball`, `synthetic`, `natural`, `pool`, `grill`, `gym`, `coliseum` | `tennis` |
+| `--hours` | canchas: `1` o `2`; otros espacios: dentro del bloque publicado; asadores: el bloque completo | `1` |
+| `--lane` / `--sport-id` | piscinas: carril (`court lanes`); coliseos: deporte (`court sports`) | — |
 
 Los nombres de día apuntan a la **próxima** ocurrencia, contando hoy. Todas las horas son de Bogotá.
+
+Cobertura del portal (3 nov 2026, en vivo): 320 canchas, 12 piscinas, 35 asadores, 5 gimnasios, 4 coliseos; 74 actividades en 45 sedes y 29 programas.
 
 ## Cómo te protege al reservar
 
@@ -221,11 +241,14 @@ Tu contraseña **nunca** se guarda en disco. El CLI no envía datos a ningún se
 
 | Parte | Estado |
 |---|---|
-| Buscar canchas y horarios (5 deportes) | ✅ Verificado contra el portal real |
-| Inicio de sesión | ✅ Verificado contra el portal real |
-| Bancos PSE | ✅ Verificado contra el portal real |
+| Buscar espacios y horarios: canchas (5 deportes), piscinas por carril, asadores, gimnasios, coliseos | ✅ Verificado contra el portal real, todas las páginas |
+| Actividades, programas, sedes, categorías | ✅ Verificado contra el portal real |
+| Inicio de sesión · Bancos PSE | ✅ Verificado contra el portal real |
 | Crear reserva y confirmar reserva gratuita o pago PSE | 🟡 Implementado a partir del código del propio portal y cubierto por pruebas con un simulador. **Todavía no se ha ejecutado una reserva real.** |
+| Mensualidad de gimnasio (estado, cotización, compra, activación) | 🟡 Igual: desde el código del portal, sin ejecutar en vivo |
+| Inscripción y retiro de actividades, perfiles, pagos pendientes e historial | 🟡 Igual: desde el código del portal, sin ejecutar en vivo |
 | Tope de 4 horas por semana | ℹ️ Lo valida el portal, no el CLI |
+| Pago por Daviplata, calendario de recreación, programas sociales | ❌ Fuera de alcance |
 
 Si haces la primera reserva real, tu respuesta queda guardada en `~/.idrd/bookings/`. Si algo no coincide con lo esperado, el error muestra el mensaje del portal.
 

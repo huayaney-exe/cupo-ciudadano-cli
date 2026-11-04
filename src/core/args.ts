@@ -8,7 +8,7 @@ import { fail } from "./errors.js";
  */
 const BOOLEAN_FLAGS = new Set([
   "json", "dry-run", "no-input", "quiet", "verbose", "help", "yes", "all",
-  "open", "version", "no-banner", "free", "password-stdin",
+  "open", "version", "no-banner", "free", "password-stdin", "paid", "available",
 ]);
 const SHORT_BOOLEANS = new Set(["q", "v", "h", "y"]);
 

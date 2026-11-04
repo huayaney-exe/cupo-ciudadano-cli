@@ -400,7 +400,9 @@ var BOOLEAN_FLAGS = new Set([
   "version",
   "no-banner",
   "free",
-  "password-stdin"
+  "password-stdin",
+  "paid",
+  "available"
 ]);
 var SHORT_BOOLEANS = new Set(["q", "v", "h", "y"]);
 function parseArgs(argv) {
@@ -821,12 +823,17 @@ async function webClient(opts = {}) {
 
 // src/idrd/sports.ts
 var SPORTS = {
-  tennis: { path: "/api/parks/tennis-courts", label: "Tenis" },
-  padel: { path: "/api/parks/paddle-courts", label: "Pádel" },
-  pickleball: { path: "/api/parks/pickleball-courts", label: "Pickleball" },
-  synthetic: { path: "/api/parks/synthetic-fields", label: "Fútbol sintético" },
-  natural: { path: "/api/parks/natural-soccer-fields", label: "Fútbol natural" }
+  tennis: { path: "/api/parks/tennis-courts", label: "Tenis", noun: "cancha", plural: "canchas", capacity: "exclusive" },
+  padel: { path: "/api/parks/paddle-courts", label: "Pádel", noun: "cancha", plural: "canchas", capacity: "exclusive" },
+  pickleball: { path: "/api/parks/pickleball-courts", label: "Pickleball", noun: "cancha", plural: "canchas", capacity: "exclusive" },
+  synthetic: { path: "/api/parks/synthetic-fields", label: "Fútbol sintético", noun: "cancha", plural: "canchas", capacity: "exclusive" },
+  natural: { path: "/api/parks/natural-soccer-fields", label: "Fútbol natural", noun: "cancha", plural: "canchas", capacity: "exclusive" },
+  pool: { path: "/api/parks/swimming-pools", label: "Piscinas", noun: "piscina", plural: "piscinas", capacity: "quota", needs: "lane" },
+  grill: { path: "/api/parks/grills", label: "Asadores", noun: "asador", plural: "asadores", capacity: "exclusive", block: true },
+  gym: { path: "/api/parks/gyms", label: "Gimnasios", noun: "gimnasio", plural: "gimnasios", capacity: "quota" },
+  coliseum: { path: "/api/parks/coliseum", label: "Coliseos", noun: "coliseo", plural: "coliseos", capacity: "exclusive", needs: "sport" }
 };
+var ALL_SPORTS = Object.keys(SPORTS);
 var ALIASES = {
   tennis: "tennis",
   tenis: "tennis",
@@ -841,16 +848,58 @@ var ALIASES = {
   sinteticas: "synthetic",
   futbol: "synthetic",
   natural: "natural",
-  naturales: "natural"
+  naturales: "natural",
+  pool: "pool",
+  pools: "pool",
+  piscina: "pool",
+  piscinas: "pool",
+  natacion: "pool",
+  natación: "pool",
+  grill: "grill",
+  grills: "grill",
+  asador: "grill",
+  asadores: "grill",
+  asadero: "grill",
+  asaderos: "grill",
+  bbq: "grill",
+  gym: "gym",
+  gyms: "gym",
+  gimnasio: "gym",
+  gimnasios: "gym",
+  coliseum: "coliseum",
+  coliseo: "coliseum",
+  coliseos: "coliseum",
+  polideportivo: "coliseum"
 };
 function parseSport(input) {
   if (!input)
     return "tennis";
   const s = ALIASES[input.trim().toLowerCase()];
   if (!s)
-    fail("usage/bad-sport", `Deporte desconocido: ${input}.`, `Opciones: ${Object.keys(SPORTS).join(", ")}.`);
+    fail("usage/bad-sport", `Tipo de espacio desconocido: ${input}.`, `Opciones: ${ALL_SPORTS.join(", ")}.`);
   return s;
 }
+function sportFromEndowment(kind, hints = {}) {
+  const k = kind.trim().toUpperCase();
+  if (k === "PISCINA")
+    return "pool";
+  if (k === "ASADERO" || hints.isGrill)
+    return "grill";
+  if (k === "OTRO(MÓDULO)" || k === "OTRO(MODULO)")
+    return "gym";
+  if (k === "POLIDEPORTIVO")
+    return "coliseum";
+  if (hints.isPickleball)
+    return "pickleball";
+  if (hints.isPaddle)
+    return "padel";
+  if (k.includes("TENNIS") || k.includes("TENIS"))
+    return "tennis";
+  if (k.includes("NATURAL"))
+    return "natural";
+  return "synthetic";
+}
+var CEFE_POOL_IDS = new Set([16893, 17256, 17082, 18181, 12499]);
 
 // src/idrd/api.ts
 function normalizeCourt(c, sport) {
@@ -878,9 +927,55 @@ function ensureOk(res, what) {
     fail("upstream/error", `${what}: HTTP ${res.status}.`, upstreamMessage(res.body));
   return res.body;
 }
+var PAGE_SIZE = 500;
+var MAX_PAGES = 50;
+async function paginate(path, what, query = {}, token) {
+  const all = [];
+  let page = 1;
+  let lastPage = 1;
+  do {
+    const body = ensureOk(await request(HOSTS.api, path, { query: { ...query, per_page: PAGE_SIZE, page }, token }), what);
+    all.push(...body?.data ?? []);
+    const meta = body?.meta ?? {};
+    lastPage = Math.max(1, Number(meta.last_page) || 1);
+    const current = Number(meta.current_page) || page;
+    if (current !== page)
+      break;
+    page += 1;
+  } while (page <= lastPage && page <= MAX_PAGES);
+  if (lastPage > MAX_PAGES) {
+    fail("upstream/pagination", `${what}: el portal devolvió ${lastPage} páginas y solo leí ${MAX_PAGES}.`, "Reporta el cambio; el listado estaría incompleto.");
+  }
+  return all;
+}
 async function listCourts(sport) {
-  const body = ensureOk(await request(HOSTS.api, SPORTS[sport].path), "Listado de canchas");
-  return (body?.data ?? []).map((c) => normalizeCourt(c, sport));
+  const raw = await paginate(SPORTS[sport].path, "Listado de espacios");
+  const seen = new Set;
+  const courts = [];
+  for (const r of raw) {
+    const c = normalizeCourt(r, sport);
+    if (!seen.has(c.id)) {
+      seen.add(c.id);
+      courts.push(c);
+    }
+  }
+  return courts;
+}
+async function listLanes(poolId) {
+  const body = ensureOk(await request(HOSTS.api, "/api/parks/swimming-pool-lanes", { query: { id_dotacion: poolId } }), "Carriles");
+  return (body?.data ?? []).map((l) => ({
+    id: Number(l.id),
+    name: cleanText(l.name, 20),
+    level: cleanText(l.level?.name, 30),
+    direction: cleanText(l.direction?.name, 30),
+    quota: l.quota === undefined || l.quota === null ? null : Number(l.quota),
+    poolId: l.pool?.id_piscina === undefined ? null : Number(l.pool.id_piscina),
+    enabled: String(l.enable ?? "1") === "1"
+  }));
+}
+async function listColiseumSports(coliseumId) {
+  const body = ensureOk(await request(HOSTS.api, "/api/parks/coliseum-sports", { query: { id_dotacion: coliseumId } }), "Deportes del coliseo");
+  return (body?.data ?? []).map((d) => ({ id: Number(d.id), name: cleanText(d.nombre ?? d.name, 60) }));
 }
 async function getPark(parkId) {
   const body = ensureOk(await request(HOSTS.api, `/api/parks/${parkId}/details`), "Parque");
@@ -895,20 +990,24 @@ async function getPark(parkId) {
     stratum: typeof d.stratum === "number" ? d.stratum : null
   };
 }
-async function getSchedule(courtId, date) {
-  const res = await request(HOSTS.api, `/api/parks/schedules/${courtId}`, { query: { date } });
-  const body = ensureOk(res, `Horarios de la cancha ${courtId}`);
+var truthy = (v) => v === true || v === 1 || v === "1" || v === "True" || v === "true";
+async function getSchedule(courtId, date, opts = {}) {
+  const res = await request(HOSTS.api, `/api/parks/schedules/${courtId}`, { query: { date, lane: opts.lane, sport_id: opts.sportId, document: opts.document } });
+  const body = ensureOk(res, `Horarios del espacio ${courtId}`);
   const det = body?.details ?? {};
   const inner = det.details ?? {};
+  const kind = cleanText(inner.endowment, 40);
   return {
     entries: (body?.data ?? []).filter((e) => typeof e?.start === "string" && typeof e?.end === "string"),
     endowment: {
-      kind: cleanText(inner.endowment, 40),
+      kind,
+      sport: sportFromEndowment(kind, { isPickleball: truthy(inner.is_pickleball), isPaddle: truthy(inner.is_paddle), isGrill: truthy(inner.is_grill) }),
       description: cleanText(inner.description ?? det.endowment_description, 120),
       status: cleanText(inner.status, 40),
       surface: cleanText(inner.floor_material, 80),
       lighting: cleanText(inner.illumination, 10),
-      allDay: Boolean(inner.all_day),
+      allDay: truthy(inner.all_day),
+      lanes: inner.lane === undefined || inner.lane === null ? null : Number(inner.lane) || null,
       rules: cleanBlock(inner.requirements, 6000)
     },
     park: {
@@ -967,7 +1066,8 @@ async function me(token) {
     verified: Boolean(u.is_verified ?? u.verified_at),
     hasProfile: Boolean(u.has_profile),
     document: profile.document ? cleanText(profile.document, 30) : null,
-    documentType: profile.document_type_id ? cleanText(profile.document_type_id, 10) : null
+    documentType: profile.document_type_id ? cleanText(profile.document_type_id, 10) : null,
+    profile
   };
 }
 async function logout(token) {
@@ -997,6 +1097,126 @@ async function paymentStatus(token, code) {
   const res = await request(HOSTS.pay, `/api/payment-gateway/status/${encodeURIComponent(code)}`, { token });
   const ok2 = ensureOk(res, "Estado del pago");
   return ok2?.data ?? ok2;
+}
+function dataOf(res, what) {
+  const ok2 = ensureOk(res, what);
+  const d = ok2 && typeof ok2 === "object" && "data" in ok2 ? ok2.data : ok2;
+  return d && typeof d === "object" ? d : {};
+}
+async function gymMembershipStatus(token, gymId) {
+  return dataOf(await request(HOSTS.api, `/api/parks/schedules/${gymId}/gym-membership/status`, { token }), "Estado de la mensualidad");
+}
+async function gymMembershipQuote(token, gymId) {
+  return dataOf(await request(HOSTS.api, `/api/parks/schedules/${gymId}/gym-membership/quote`, { token }), "Cotización de la mensualidad");
+}
+async function gymMembershipAvailability(token, gymId) {
+  return dataOf(await request(HOSTS.api, `/api/parks/schedules/${gymId}/gym-membership/availability`, { token }), "Disponibilidad de la mensualidad");
+}
+async function gymMembershipActive(token) {
+  const res = await request(HOSTS.api, "/api/parks/gym-membership/active", { token });
+  const ok2 = ensureOk(res, "Mensualidades activas");
+  return ok2?.data ?? ok2;
+}
+async function gymMembershipPurchase(token, gymId, body) {
+  return dataOf(await request(HOSTS.api, `/api/parks/schedules/${gymId}/gym-membership/purchase`, { method: "POST", token, body }), "Compra de la mensualidad");
+}
+async function membershipReservations(token, membershipId) {
+  return dataOf(await request(HOSTS.api, `/api/memberships/${membershipId}/reservations`, { token }), "Reservas de la mensualidad");
+}
+function normalizeActivity(a) {
+  const quota = Number(a.quota ?? 0);
+  const taken = Number(a.taken ?? a.users_schedules_count ?? 0);
+  return {
+    id: Number(a.id),
+    program: cleanText(a.program_name, 120),
+    name: cleanText(a.activity_name, 160),
+    stage: cleanText(a.stage_name, 160),
+    parkName: cleanText(a.park_name, 120),
+    parkCode: cleanText(a.park_code, 20),
+    address: cleanText(a.park_address, 200),
+    weekdays: cleanText(a.weekday_name, 80),
+    hours: cleanText(a.daily_name, 80),
+    minAge: a.min_age === null || a.min_age === undefined ? null : Number(a.min_age),
+    maxAge: a.max_age === null || a.max_age === undefined ? null : Number(a.max_age),
+    quota,
+    taken,
+    left: Math.max(0, quota - taken),
+    paid: Boolean(a.is_paid),
+    rate: cleanText(a.rate_name, 80),
+    rateValue: a.rate_value === null || a.rate_value === undefined ? null : Number(a.rate_value),
+    startDate: cleanText(a.start_date, 30),
+    endDate: cleanText(a.final_date, 30),
+    active: Boolean(a.is_activated),
+    open: Boolean(a.is_initiate),
+    teams: Boolean(a.is_teams),
+    disability: Boolean(a.disability),
+    consent: Array.isArray(a.consent) ? a.consent : [],
+    regulations: Array.isArray(a.regulations) ? a.regulations : []
+  };
+}
+async function listActivities(filter = {}) {
+  const query = {};
+  (filter.programIds ?? []).forEach((id, i) => {
+    query[`program_id[${i}]`] = id;
+  });
+  (filter.stageIds ?? []).forEach((id, i) => {
+    query[`stage_id[${i}]`] = id;
+  });
+  const raw = await paginate("/api/citizen-portal/public-schedules", "Actividades", query);
+  return raw.map(normalizeActivity);
+}
+async function getActivity(id) {
+  const body = ensureOk(await request(HOSTS.api, `/api/citizen-portal/public-schedules/${id}`), `Actividad ${id}`);
+  if (!body?.data)
+    fail("not-found/resource", `Actividad ${id}: no existe.`);
+  return normalizeActivity(body.data);
+}
+function refs(rows) {
+  return (rows ?? []).map((r) => ({
+    id: Number(r.id),
+    name: cleanText(r.name, 160),
+    count: typeof r.schedules_count === "number" ? r.schedules_count : null,
+    ...r.park_name !== undefined ? { parkName: cleanText(r.park_name, 120), parkCode: cleanText(r.park_code, 20) } : {}
+  }));
+}
+async function listPrograms() {
+  return refs(ensureOk(await request(HOSTS.api, "/api/citizen-portal/programs"), "Programas")?.data);
+}
+async function listStages() {
+  return refs(ensureOk(await request(HOSTS.api, "/api/citizen-portal/stages"), "Escenarios")?.data);
+}
+async function listCategories() {
+  const body = ensureOk(await request(HOSTS.api, "/api/citizen-portal/schedules/categories"), "Categorías");
+  return (body?.data ?? []).map((c) => ({ name: cleanText(c.name, 80), value: cleanText(c.value, 80) }));
+}
+async function listProfiles(token) {
+  const body = ensureOk(await request(HOSTS.api, "/api/profiles/list", { token }), "Perfiles");
+  return Array.isArray(body?.data) ? body.data : [];
+}
+async function listBeneficiaries(token) {
+  const body = ensureOk(await request(HOSTS.api, "/api/profiles", { token }), "Beneficiarios");
+  return Array.isArray(body?.data) ? body.data : [];
+}
+async function listSubscriptions(token) {
+  const body = ensureOk(await request(HOSTS.api, "/api/profiles/subscriptions", { token }), "Inscripciones");
+  return Array.isArray(body?.data) ? body.data : [];
+}
+async function subscribe(token, profileId, activityId, body) {
+  const res = await request(HOSTS.api, `/api/profiles/${profileId}/schedules/${activityId}`, { method: "POST", token, body });
+  const ok2 = ensureOk(res, "Inscripción");
+  return { message: cleanText(ok2?.data ?? ok2?.message, 300), details: ok2?.details ?? null };
+}
+async function unsubscribe(token, subscriptionId) {
+  const res = await request(HOSTS.api, `/api/profiles/subscriptions/${subscriptionId}`, { method: "DELETE", token });
+  return ensureOk(res, "Desinscripción");
+}
+async function pendingToPay(token) {
+  const body = ensureOk(await request(HOSTS.api, "/api/citizen-portal/pending-to-pay", { token }), "Pagos pendientes");
+  const list = Array.isArray(body) ? body : body?.data ?? [];
+  return Array.isArray(list) ? list : [];
+}
+async function paymentHistory(token) {
+  return paginate("/api/citizen-portal/payments", "Historial de pagos", {}, token);
 }
 
 // src/idrd/auth.ts
@@ -1198,6 +1418,8 @@ function normalizeBooking(raw, ctx) {
     serviceId: raw.service_id,
     holdUntil: typeof raw.created_at === "string" ? raw.created_at : null,
     createdAt: new Date().toISOString(),
+    lane: ctx.lane ?? null,
+    sportId: ctx.sportId ?? null,
     raw
   };
 }
@@ -1258,7 +1480,45 @@ function paymentPayload(b, opts) {
     BankTypeSelected: b.free ? "0" : opts.bankCode,
     redirect_url: RECEIPT_BASE,
     ip_address: opts.ip,
-    sport_id: null
+    sport_id: b.sportId ?? null
+  };
+}
+function membershipPaymentPayload(quote, profile, opts) {
+  const s = (v) => v === null || v === undefined ? null : String(v);
+  const person = profile.person_type_id || "N";
+  const amount = Number(quote.amount ?? 0);
+  const base = {
+    permitTypeSelected: "PO",
+    permitNumber: "999",
+    name: profile.name ?? profile.first_name ?? null,
+    lastName: profile.surname ?? profile.last_name ?? null,
+    phone: s(profile.phone ?? profile.mobile_phone),
+    email: opts.email,
+    address: profile.address ?? null,
+    documentTypeSelected: profile.document_type_id ?? null,
+    document: profile.document ?? null,
+    parkSelected: quote.park_id ?? null,
+    serviceParkSelected: quote.service_id ?? null,
+    isTheSame: true,
+    concept: quote.concept ?? "Mensualidad Gimnasio",
+    totalPay: amount,
+    typePersonSelected: person,
+    typePersonSelectedPayer: person,
+    BankTypeSelected: amount === 0 ? "0" : opts.bankCode,
+    redirect_url: RECEIPT_BASE,
+    ip_address: opts.ip,
+    sport_id: null,
+    ...opts.membershipId ? { membership_id: opts.membershipId } : {}
+  };
+  return {
+    ...base,
+    documentTypeSelectedPayer: base.documentTypeSelected,
+    documentPayer: base.document,
+    namePayer: base.name,
+    lastNamePayer: base.lastName,
+    phonePayer: base.phone,
+    emailPayer: base.email,
+    addressPayer: base.address
   };
 }
 
@@ -1266,53 +1526,75 @@ function paymentPayload(b, opts) {
 var COMMANDS = [
   {
     name: "court list",
-    summary: "Lista canchas de un deporte (por defecto solo las reservables).",
+    summary: "Lista espacios reservables de un tipo: canchas, piscinas, asadores, gimnasios, coliseos (por defecto solo los reservables en línea). Alias: `idrd space list`.",
     flags: [
-      { flag: "--sport <tennis|padel|pickleball|synthetic|natural>", description: "Deporte (default tennis)" },
+      { flag: "--sport <tennis|padel|pickleball|synthetic|natural|pool|grill|gym|coliseum>", description: "Tipo de espacio (default tennis)" },
       { flag: "--locality <texto>", description: "Filtra por localidad (ej. usaquen)" },
       { flag: "--all", description: "Incluye canchas no reservables en línea" }
     ],
     trust: "T0",
     auth: false,
     output: "Court[] {id, parkId, parkName, parkCode, address, locality, upz, sport, description, bookable}",
-    examples: ["idrd court list", "idrd court list --sport padel"]
+    examples: ["idrd court list", "idrd court list --sport padel", "idrd court list --sport pool --all"]
   },
   {
     name: "court get",
-    summary: "Detalle de una cancha: parque, horario de servicio, superficie, reglas de uso.",
-    args: [{ name: "id", description: "id de la cancha (park_endowment_id)" }],
+    summary: "Detalle de un espacio: tipo, parque, horario de servicio, superficie, reglas; carriles (piscinas) o deportes (coliseos).",
+    args: [{ name: "id", description: "id del espacio (park_endowment_id)" }],
     trust: "T0",
     auth: false,
-    output: "{court, park, endowment{kind,status,surface,lighting,rules}}",
-    examples: ["idrd court get 11537"]
+    output: "{court, kind, park, endowment{kind,sport,status,surface,lighting,lanes,rules}, lanes[], sports[]}",
+    examples: ["idrd court get 11537", "idrd court get 16893"]
+  },
+  {
+    name: "court lanes",
+    summary: "Carriles de una piscina (las piscinas se consultan y reservan por carril).",
+    args: [{ name: "id", description: "id de la piscina" }],
+    trust: "T0",
+    auth: false,
+    output: "Lane[] {id, name, level, direction, quota, poolId, enabled}",
+    examples: ["idrd court lanes 16893"]
+  },
+  {
+    name: "court sports",
+    summary: "Deportes que admite un coliseo (el id va en --sport-id al consultar y reservar).",
+    args: [{ name: "id", description: "id del coliseo" }],
+    trust: "T0",
+    auth: false,
+    output: "ColiseumSport[] {id, name}",
+    examples: ["idrd court sports 16892"]
   },
   {
     name: "slot list",
-    summary: "Horas de una cancha en una fecha, con disponibilidad real (reservable menos reservado).",
-    args: [{ name: "id", description: "id de la cancha" }],
+    summary: "Horas de un espacio en una fecha, con disponibilidad real (reservable menos reservado; cupos en piscinas y gimnasios; bloques en asadores).",
+    args: [{ name: "id", description: "id del espacio" }],
     flags: [
       { flag: "--date <YYYY-MM-DD|hoy|mañana|lun..dom>", description: "Fecha (default hoy)" },
-      { flag: "--free", description: "Solo horas libres" }
+      { flag: "--free", description: "Solo horas libres" },
+      { flag: "--lane <id>", description: "Piscinas: carril (obligatorio; ver `court lanes`)" },
+      { flag: "--sport-id <id>", description: "Coliseos: deporte (ver `court sports`)" },
+      { flag: "--document <doc>", description: "CEFE: documento del beneficiario (filtra su calendario)" }
     ],
     trust: "T0",
     auth: false,
-    output: "{courtId, date, weekDates[], slots: HourSlot[] {hour,start,end,available}, freeRuns}",
-    examples: ["idrd slot list 11537 --date vie --free"]
+    output: "{courtId, kind, lane, sportId, date, weekDates[], slots: HourSlot[] {hour,start,end,available,quota?,used?}, blocks: [{from,to,available}], freeRuns}",
+    examples: ["idrd slot list 11537 --date vie --free", "idrd slot list 16893 --lane 3 --date sab", "idrd slot list 16892 --sport-id 3 --date dom"]
   },
   {
     name: "slot find",
-    summary: "Busca horas libres en todas las canchas de un deporte. Atajo: `idrd find`.",
+    summary: "Busca horas libres en todos los espacios de un tipo (piscinas: en todos sus carriles). Atajo: `idrd find`.",
     flags: [
       { flag: "--date <fecha>", description: "Fecha (default mañana)" },
-      { flag: "--sport <deporte>", description: "Deporte (default tennis)" },
+      { flag: "--sport <tipo>", description: "Tipo de espacio (default tennis)" },
       { flag: "--from <hora>", description: "Desde esta hora, ej. 6 (default 0)" },
       { flag: "--to <hora>", description: "Hasta esta hora, ej. 9 (default 24)" },
-      { flag: "--locality <texto>", description: "Filtra por localidad" }
+      { flag: "--locality <texto>", description: "Filtra por localidad o parque" },
+      { flag: "--sport-id <id>", description: "Coliseos: deporte" }
     ],
     trust: "T0",
     auth: false,
-    output: "{date, sport, window, results: [{court, freeHours[]}], scanned, failed[]}",
-    examples: ["idrd find --date mie --from 6 --to 9"]
+    output: "{date, sport, window, results: [{court, lane?, freeHours[], places?}], scanned, spaces, failed[]}",
+    examples: ["idrd find --date mie --from 6 --to 9", "idrd find --sport pool --date sab --from 6 --to 10", "idrd find --sport grill --date dom"]
   },
   {
     name: "auth login",
@@ -1337,12 +1619,16 @@ var COMMANDS = [
   },
   {
     name: "booking create",
-    summary: "Reserva una cancha. Sin --yes solo muestra la vista previa. Las reservas NO se pueden cancelar.",
-    args: [{ name: "id", description: "id de la cancha" }],
+    summary: "Reserva un espacio (cancha, piscina, asador, gimnasio por hora, coliseo). Sin --yes solo muestra la vista previa. Las reservas NO se pueden cancelar.",
+    args: [{ name: "id", description: "id del espacio" }],
     flags: [
       { flag: "--date <fecha>", description: "Fecha de la reserva" },
-      { flag: "--hour <hora>", description: 'Hora de inicio, ej. 6 o "6:00 AM"' },
-      { flag: "--hours <1|2>", description: "Duración (máx. 2, default 1)" },
+      { flag: "--hour <hora>", description: 'Hora de inicio, ej. 6 o "6:00 AM" (asadores: inicio del bloque, default el primero libre)' },
+      { flag: "--hours <n>", description: "Duración (canchas máx. 2; otros, dentro del bloque publicado; asadores: el bloque completo)" },
+      { flag: "--lane <id>", description: "Piscinas: carril (obligatorio)" },
+      { flag: "--sport-id <id>", description: "Coliseos: deporte (obligatorio)" },
+      { flag: "--document <doc>", description: "Beneficiario distinto al titular (CEFE); default tu documento" },
+      { flag: "--adult-document-type <t> --adult-document <n> --adult-name <nombre>", description: "Piscinas CEFE: adulto responsable para beneficiarios de 5 a 12 años" },
       { flag: "--bank <código>", description: "Si cobra: genera de una vez el link PSE con este banco" },
       { flag: "--yes --confirm <intent>", description: "Ejecuta. <intent> lo imprime la vista previa" },
       { flag: "--dry-run", description: "Fuerza vista previa aunque pases --yes" }
@@ -1350,7 +1636,7 @@ var COMMANDS = [
     trust: "T3",
     auth: true,
     output: "preview: {dryRun:true, intent, request, checks[]} | live: {booking: BookingRecord, payment?}",
-    examples: ["idrd booking create 11537 --date vie --hour 6", "idrd booking create 11537 --date vie --hour 6 --yes --confirm 11537@2026-11-06T06x1"]
+    examples: ["idrd booking create 11537 --date vie --hour 6", "idrd booking create 16893 --lane 3 --date sab --hour 7", "idrd booking create 16848 --date dom", "idrd booking create 11537 --date vie --hour 6 --yes --confirm 11537@2026-11-06T06x1"]
   },
   { name: "pay banks", summary: "Bancos disponibles en PSE.", trust: "T0", auth: false, output: "Bank[] {code, name}" },
   {
@@ -1374,6 +1660,61 @@ var COMMANDS = [
     auth: true,
     output: "object (respuesta del portal)"
   },
+  { name: "pay pending", summary: "Pagos pendientes de tu cuenta en el portal.", trust: "T0", auth: true, output: "object[] (respuesta del portal)" },
+  { name: "pay history", summary: "Historial de pagos de tu cuenta.", trust: "T0", auth: true, output: "object[] (respuesta del portal)" },
+  { name: "gym status", summary: "Estado de tu mensualidad en un gimnasio CEFE (y sus reservas).", args: [{ name: "id", description: "id del gimnasio" }], trust: "T0", auth: true, output: "{gymId, active, status, reservations}" },
+  { name: "gym quote", summary: "Cotiza la mensualidad de un gimnasio: valor y vigencia.", args: [{ name: "id", description: "id del gimnasio" }], trust: "T0", auth: true, output: "{gymId, amount, validFrom, validTo, concept, quote}" },
+  { name: "gym availability", summary: "Cupos por día y hora para usar la mensualidad.", args: [{ name: "id", description: "id del gimnasio" }], trust: "T0", auth: true, output: "{gymId, days[]}" },
+  { name: "gym active", summary: "Tus mensualidades activas en todos los gimnasios.", trust: "T0", auth: true, output: "object (respuesta del portal)" },
+  {
+    name: "gym buy",
+    summary: "Compra la mensualidad de un gimnasio. Sin --yes solo vista previa. Crea la mensualidad y el link de pago PSE; no se puede cancelar. (No ejecutado en vivo: payload copiado del portal.)",
+    args: [{ name: "id", description: "id del gimnasio" }],
+    flags: [
+      { flag: "--bank <código>", description: "Banco PSE (ver `idrd pay banks`)" },
+      { flag: "--yes --confirm <intent>", description: "Ejecuta. <intent> lo imprime la vista previa" }
+    ],
+    trust: "T3",
+    auth: true,
+    output: "preview: {dryRun, intent, ready, amount, checks[]} | live: {gymId, membershipId, amount, payment{paymentCode, bankUrl}}"
+  },
+  { name: "gym activate", summary: "Activa la mensualidad con el código de un pago PSE aprobado.", args: [{ name: "id", description: "id del gimnasio" }], flags: [{ flag: "--code <pago>", description: "código de pago" }, { flag: "--yes", description: "Confirma" }], trust: "T2", auth: true, output: "{gymId, active, status}" },
+  {
+    name: "activity list",
+    summary: "Actividades y escuelas con inscripción (Escuelas de mi Barrio, Deporte de 0 a 100, CEFE…). Lee todas las páginas.",
+    flags: [
+      { flag: "--program <ids>", description: "Programas, ej. 43,27 (ver `activity programs`)" },
+      { flag: "--stage <ids>", description: "Escenarios/sedes, ej. 1,3 (ver `activity stages`; los CEFE están aquí)" },
+      { flag: "--text <texto>", description: "Busca en nombre, programa, sede y dirección" },
+      { flag: "--locality <texto>", description: "Filtra por sede, parque o dirección" },
+      { flag: "--age <n>", description: "Solo actividades para esa edad" },
+      { flag: "--free | --paid", description: "Solo gratuitas o solo pagas" },
+      { flag: "--available", description: "Solo con cupos e inscripciones abiertas" }
+    ],
+    trust: "T0",
+    auth: false,
+    output: "Activity[] {id, program, name, stage, parkName, address, weekdays, hours, minAge, maxAge, quota, taken, left, paid, rate, rateValue, startDate, endDate, open, active, consent[], regulations[]}",
+    examples: ["idrd activity list --available", "idrd activity list --text natacion --age 8", "idrd activity list --stage 3"]
+  },
+  { name: "activity get", summary: "Detalle de una actividad: horario, edades, cupos, costo, consentimientos y reglamento.", args: [{ name: "id", description: "id de la actividad" }], trust: "T0", auth: false, output: "Activity" },
+  { name: "activity programs", summary: "Programas del portal con su número de actividades.", trust: "T0", auth: false, output: "{id, name, count}[]" },
+  { name: "activity stages", summary: "Sedes/escenarios de las actividades (incluye los CEFE) con su parque.", trust: "T0", auth: false, output: "{id, name, parkName, parkCode, count}[]" },
+  { name: "activity categories", summary: "Categorías deportivas de las actividades.", trust: "T0", auth: false, output: "{name, value}[]" },
+  { name: "activity mine", summary: "Inscripciones de tu cuenta.", trust: "T0", auth: true, output: "object[] (respuesta del portal)" },
+  {
+    name: "activity subscribe",
+    summary: "Preinscribe un perfil de tu cuenta en una actividad. Sin --yes solo vista previa. Se puede deshacer con `activity unsubscribe`. (No ejecutado en vivo.)",
+    args: [{ name: "id", description: "id de la actividad" }],
+    flags: [
+      { flag: "--person <profileId>", description: "Perfil (titular o beneficiario) a inscribir; ver `idrd profile list`" },
+      { flag: "--yes --confirm <intent>", description: "Ejecuta y acepta términos y consentimientos. <intent> lo imprime la vista previa" }
+    ],
+    trust: "T2",
+    auth: true,
+    output: "preview: {dryRun, intent, ready, request, checks[], consent[]} | live: {activityId, profileId, message, subscriptionId}"
+  },
+  { name: "activity unsubscribe", summary: "Retira una inscripción.", args: [{ name: "subscriptionId", description: "id de la inscripción (ver `activity mine`)" }], flags: [{ flag: "--yes", description: "Confirma" }], trust: "T2", auth: true, output: "{subscriptionId, unsubscribed}" },
+  { name: "profile list", summary: "Perfiles de tu cuenta (titular y beneficiarios) para inscripciones y reservas CEFE.", trust: "T0", auth: true, output: "{profiles[], beneficiaries[]}" },
   { name: "doctor", summary: "Diagnóstico: red, portal, sesión, killswitch, entorno.", trust: "T0", auth: false, output: "{ok, checks: {name, ok, detail}[]}" },
   { name: "killswitch", summary: "on|off|status — bloquea toda escritura (reservas y pagos).", args: [{ name: "on|off|status", description: "acción" }], trust: "T1", auth: false, output: "{active, reason?, activatedAt?}" },
   { name: "schema", summary: "Contrato de comandos en JSON (versionado) para agentes.", trust: "T0", auth: false, output: "{schemaVersion, cli, version, exitCodes, commands[]}" }
@@ -1512,6 +1853,27 @@ async function bookingList(ctx) {
 `)
   };
 }
+async function payPending(ctx) {
+  const { token } = await accessToken(ctx.flags.profile);
+  const items = await pendingToPay(token);
+  return {
+    data: items,
+    human: () => items.length === 0 ? `${ok("✓")} No tienes pagos pendientes.` : `${bold(`Pagos pendientes: ${items.length}`)}
+${items.map((i) => `  • ${JSON.stringify(i).slice(0, 160)}`).join(`
+`)}`,
+    nextSteps: items.length ? [{ command: "idrd pay pse <bookingId> --bank <código> --yes", description: "pagar una reserva creada desde este equipo" }] : []
+  };
+}
+async function payHistory(ctx) {
+  const { token } = await accessToken(ctx.flags.profile);
+  const items = await paymentHistory(token);
+  return {
+    data: items,
+    human: () => items.length === 0 ? "Sin pagos registrados." : `${bold(`Pagos: ${items.length}`)}
+${items.slice(0, 50).map((i) => `  • ${JSON.stringify(i).slice(0, 160)}`).join(`
+`)}`
+  };
+}
 async function doctor(ctx) {
   const checks = [
     async () => {
@@ -1580,7 +1942,7 @@ async function schema() {
 function helpText() {
   const lines = [bold("idrd") + dim(" — CLI no oficial del Portal Ciudadano IDRD (Bogotá)"), "", bold("Comandos:")];
   for (const c of COMMANDS)
-    lines.push(`  ${c.name.padEnd(16)} ${c.summary}${c.trust === "T3" ? warn("  [irreversible]") : ""}`);
+    lines.push(`  ${c.name.padEnd(21)} ${c.summary}${c.trust === "T3" ? warn("  [irreversible]") : ""}`);
   lines.push("", bold("Globales:"), ...GLOBAL_FLAGS.map((f) => `  ${f.flag.padEnd(20)} ${f.description}`));
   lines.push("", dim("Detalle de un comando: idrd <comando> --help · Contrato para agentes: idrd schema"));
   return lines.join(`
@@ -1602,6 +1964,111 @@ function commandHelp(name) {
 `);
 }
 
+// src/cli/agent/trust-ladder.ts
+import { createInterface } from "node:readline/promises";
+import { stdin as defaultStdin, stderr as defaultStderr } from "node:process";
+async function approveGate(ctx, preview, opts) {
+  if (opts.trust !== "T2" && opts.trust !== "T3")
+    return true;
+  if (opts.trust === "T3") {
+    const expected = opts.confirmAgainst;
+    if (!opts.confirm || !expected || opts.confirm !== expected) {
+      throw new AppError("approval/confirm-mismatch", {
+        name: "ApprovalConfirmMismatch",
+        human: "Confirmation value does not match the target id.",
+        hint: "Pass --yes --confirm <id> for T3 commands."
+      });
+    }
+  }
+  if (opts.yes === true)
+    return true;
+  const flags = ctx.flags ?? {};
+  const input = ctx.stdin ?? defaultStdin;
+  const output = ctx.stderr ?? defaultStderr;
+  const json = detectMode(flags) === "json";
+  const noInput = flags.noInput === true;
+  const inputTty = input.isTTY === true;
+  const outputTty = output.isTTY === true;
+  if (json || noInput || !inputTty || !outputTty) {
+    const cli = ctx.cliName ?? "this CLI";
+    throw new AppError("approval/required", {
+      name: "ApprovalRequired",
+      human: `Approval is required before ${cli} can run this operation.`,
+      hint: opts.trust === "T3" ? "Pass --yes --confirm <id>." : "Pass --yes."
+    });
+  }
+  output.write(`${preview.title}
+
+${renderPreview(preview)}
+
+`);
+  const rl = createInterface({ input, output });
+  try {
+    const answer = await rl.question("Continue? [y/N] ");
+    return answer.trim().toLowerCase() === "y" || answer.trim().toLowerCase() === "yes";
+  } finally {
+    rl.close();
+  }
+}
+function renderPreview(preview, opts = {}) {
+  const labelWidth = opts.labelWidth ?? 14;
+  const rows = Object.entries(preview.details ?? {}).map(([key, value]) => {
+    const lines = String(value ?? "").split(`
+`);
+    const [first = "", ...rest] = lines;
+    const label = `${key}:`.padEnd(labelWidth);
+    const body = [first, ...rest.map((line) => `${" ".repeat(labelWidth)}${line}`)].join(`
+`);
+    return `${label}${body}`;
+  });
+  return [
+    preview.summary,
+    ...rows.length > 0 ? ["", ...rows] : [],
+    ...preview.warning ? ["", preview.warning] : []
+  ].join(`
+`);
+}
+
+// src/cli/foundation/audit-lifecycle.ts
+import { appendFileSync, mkdirSync as mkdirSync3 } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { join as join8 } from "node:path";
+function todayFilename() {
+  return `${new Date().toISOString().slice(0, 10)}.jsonl`;
+}
+function beginAudit(auditDir, record, opts = {}) {
+  const auditId = opts.auditId ?? randomUUID();
+  const started = Date.now();
+  const baseMeta = { ...record.meta ?? {}, audit_id: auditId };
+  appendLifecycleRecord(auditDir, record, "pending", baseMeta);
+  const finish = (result, meta = {}) => {
+    appendLifecycleRecord(auditDir, record, result, {
+      ...baseMeta,
+      ...meta,
+      duration_ms: Date.now() - started
+    });
+  };
+  return {
+    auditId,
+    complete: (meta) => finish("ok", meta),
+    fail: (meta) => finish("error", meta),
+    block: (meta) => finish("blocked", meta),
+    dryRun: (meta) => finish("dry-run", meta)
+  };
+}
+function appendLifecycleRecord(auditDir, record, result, meta = {}) {
+  mkdirSync3(auditDir, { recursive: true });
+  const file = join8(auditDir, todayFilename());
+  const stored = {
+    ts: new Date().toISOString(),
+    ...record,
+    result,
+    meta
+  };
+  appendFileSync(file, `${JSON.stringify(stored)}
+`, { mode: 384 });
+}
+
 // src/core/table.ts
 function table(headers, rows, maxWidths = []) {
   const widths = headers.map((h, i) => {
@@ -1611,6 +2078,206 @@ function table(headers, rows, maxWidths = []) {
   const line = (cells) => cells.map((c, i) => padVisible(truncateVisible(c ?? "", widths[i]), widths[i])).join("  ").trimEnd();
   return [bold(line(headers)), dim(widths.map((w) => "─".repeat(w)).join("  ")), ...rows.map(line)].join(`
 `);
+}
+
+// src/commands/activities.ts
+var fold = (s) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+function ids(ctx, key) {
+  const v = str(ctx.args, key);
+  if (!v)
+    return;
+  const out = v.split(",").map((x) => Number(x.trim()));
+  if (out.some((n) => !Number.isInteger(n) || n <= 0))
+    fail("usage/bad-arg", `--${key} debe ser una lista de ids, ej. 43,27.`);
+  return out;
+}
+function activityId(raw) {
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n <= 0)
+    fail("usage/bad-id", `Id de actividad inválido: ${raw}.`, "Usa el id de `idrd activity list`.");
+  return n;
+}
+async function activityList(ctx) {
+  let acts = await listActivities({ programIds: ids(ctx, "program"), stageIds: ids(ctx, "stage") });
+  const text = str(ctx.args, "text") ?? str(ctx.args, "q");
+  if (text)
+    acts = acts.filter((a) => fold(`${a.name} ${a.program} ${a.stage} ${a.parkName} ${a.address}`).includes(fold(text)));
+  const loc = str(ctx.args, "locality");
+  if (loc)
+    acts = acts.filter((a) => fold(`${a.stage} ${a.parkName} ${a.address}`).includes(fold(loc)));
+  if (ctx.args.free)
+    acts = acts.filter((a) => !a.paid);
+  if (ctx.args.paid)
+    acts = acts.filter((a) => a.paid);
+  if (ctx.args.available)
+    acts = acts.filter((a) => a.left > 0 && a.open && a.active);
+  const age = str(ctx.args, "age") ? Number(str(ctx.args, "age")) : undefined;
+  if (age !== undefined)
+    acts = acts.filter((a) => (a.minAge ?? 0) <= age && age <= (a.maxAge ?? 200));
+  acts.sort((a, b) => a.program.localeCompare(b.program) || a.name.localeCompare(b.name));
+  const first = acts[0];
+  return {
+    data: acts,
+    human: () => acts.length === 0 ? "No hay actividades con esos filtros." : `${bold(`Actividades: ${acts.length}`)}
+
+${table(["ID", "Actividad", "Dónde", "Cuándo", "Edad", "Cupos", "Costo"], acts.map((a) => [
+      strong(String(a.id)),
+      a.name,
+      a.stage || a.parkName,
+      `${a.weekdays} ${a.hours}`.trim(),
+      a.minAge !== null || a.maxAge !== null ? `${a.minAge ?? ""}–${a.maxAge ?? ""}` : "",
+      a.left > 0 ? ok(`${a.left}/${a.quota}`) : muted(`0/${a.quota}`),
+      a.paid ? `${a.rate} ${a.rateValue ?? ""}`.trim() : muted("gratis")
+    ]), [7, 30, 24, 28, 7, 8, 12])}`,
+    nextSteps: first ? [
+      { command: `idrd activity get ${first.id}`, description: "detalle, consentimientos y reglamento" },
+      { command: `idrd activity subscribe ${first.id} --person <profileId>`, description: "vista previa de la inscripción" }
+    ] : [{ command: "idrd activity programs", description: "ver programas con cupos" }]
+  };
+}
+async function activityGet(ctx) {
+  const id = activityId(positional(ctx.args, 0, "id"));
+  const a = await getActivity(id);
+  return {
+    data: a,
+    human: () => [
+      bold(`${a.name} · ${a.program}`),
+      `${muted("Dónde")}   ${a.stage || a.parkName} · ${a.address}`,
+      `${muted("Cuándo")}  ${a.weekdays} ${a.hours} · ${a.startDate.slice(0, 10)} → ${a.endDate.slice(0, 10)}`,
+      `${muted("Quién")}   ${a.minAge ?? "?"}–${a.maxAge ?? "?"} años${a.disability ? " · personas en situación de discapacidad" : ""}${a.teams ? " · por equipos" : ""}`,
+      `${muted("Cupos")}   ${a.left} libres de ${a.quota} · ${a.open && a.active ? ok("inscripciones abiertas") : warn("inscripciones cerradas")}`,
+      `${muted("Costo")}   ${a.paid ? `${a.rate} ${a.rateValue ?? ""}` : "gratis"}`,
+      a.consent.length ? dim(`  ${a.consent.length} consentimiento(s) por aceptar (ver --json)`) : "",
+      a.regulations.length ? dim(`  ${a.regulations.length} reglamento(s) (ver --json)`) : ""
+    ].filter(Boolean).join(`
+`),
+    nextSteps: [{ command: `idrd activity subscribe ${id} --person <profileId>`, description: "vista previa de la inscripción" }]
+  };
+}
+async function activityPrograms() {
+  const rows = await listPrograms();
+  return {
+    data: rows,
+    human: () => rows.map((r) => `  ${strong(String(r.id).padEnd(4))} ${r.name}${r.count ? muted(`  (${r.count})`) : ""}`).join(`
+`),
+    nextSteps: [{ command: `idrd activity list --program ${rows.find((r) => (r.count ?? 0) > 0)?.id ?? rows[0]?.id ?? 1}`, description: "actividades de un programa" }]
+  };
+}
+async function activityStages() {
+  const rows = await listStages();
+  return {
+    data: rows,
+    human: () => rows.map((r) => `  ${strong(String(r.id).padEnd(4))} ${r.name}${r.parkName ? muted(` · ${r.parkName}`) : ""}${r.count ? muted(`  (${r.count})`) : ""}`).join(`
+`),
+    nextSteps: [{ command: `idrd activity list --stage ${rows[0]?.id ?? 1}`, description: "actividades de un escenario" }]
+  };
+}
+async function activityCategories() {
+  const rows = await listCategories();
+  return { data: rows, human: () => rows.map((r) => `  ${r.value.padEnd(22)} ${muted(r.name)}`).join(`
+`) };
+}
+async function activityMine(ctx) {
+  const { token } = await accessToken(ctx.flags.profile);
+  const subs = await listSubscriptions(token);
+  return {
+    data: subs,
+    human: () => subs.length === 0 ? "Sin inscripciones." : subs.map((s) => `  • ${JSON.stringify(s).slice(0, 160)}`).join(`
+`)
+  };
+}
+async function profileList(ctx) {
+  const { token } = await accessToken(ctx.flags.profile);
+  const [profiles, beneficiaries] = await Promise.all([listProfiles(token), listBeneficiaries(token).catch(() => [])]);
+  const data = { profiles, beneficiaries };
+  return {
+    data,
+    human: () => profiles.length === 0 ? "Sin perfiles. Completa tu perfil en el portal." : profiles.map((p) => `  ${strong(String(p.id ?? p.profile_id ?? "?").padEnd(8))} ${String(p.name ?? p.full_name ?? "")} ${muted(`doc ${String(p.document ?? "")}${p.age !== undefined ? ` · ${String(p.age)} años` : ""}${p.verified === false ? " · sin verificar" : ""}`)}`).join(`
+`)
+  };
+}
+function profileIdOf(p) {
+  return Number(p.id ?? p.profile_id);
+}
+async function activitySubscribe(ctx) {
+  const id = activityId(positional(ctx.args, 0, "id"));
+  const profileId = Number(requireStr(ctx.args, "person", "--person"));
+  if (!Number.isInteger(profileId) || profileId <= 0)
+    fail("usage/bad-arg", "--person debe ser el id numérico de `idrd profile list`.");
+  const live = ctx.args.yes === true && !ctx.flags.dryRun;
+  const intent = `activity${id}@profile${profileId}`;
+  const { token } = await accessToken(ctx.flags.profile);
+  const [a, profiles, subs] = await Promise.all([getActivity(id), listProfiles(token), listSubscriptions(token).catch(() => [])]);
+  const person = profiles.find((p) => profileIdOf(p) === profileId);
+  const age = person && person.age !== undefined && person.age !== null ? Number(person.age) : null;
+  const already = subs.some((s) => Number(s.schedule_id ?? s.citizen_schedule_id ?? s.id) === id && Number(s.profile_id) === profileId);
+  const k = getKillswitchState(appHome());
+  const checks = [
+    { name: "killswitch", ok: !k.active, detail: k.active ? `activo: ${k.reason}` : "apagado" },
+    { name: "perfil", ok: Boolean(person), detail: person ? `${String(person.name ?? "")} (${String(person.document ?? "")})` : `no encontré el perfil ${profileId} en tu cuenta` },
+    { name: "verificado", ok: !person || person.verified !== false, detail: person?.verified === false ? "el perfil no está verificado" : "ok" },
+    { name: "inscripciones", ok: a.open && a.active, detail: a.open && a.active ? "abiertas" : "cerradas" },
+    { name: "cupos", ok: a.left > 0, detail: `${a.left} libres de ${a.quota}` },
+    { name: "edad", ok: age === null || (a.minAge ?? 0) <= age && age <= (a.maxAge ?? 200), detail: age === null ? "sin edad en el perfil" : `${age} años (${a.minAge ?? "?"}–${a.maxAge ?? "?"})` },
+    { name: "repetida", ok: !already, detail: already ? "este perfil ya está inscrito" : "no estaba inscrito" }
+  ];
+  const ready = checks.every((c) => c.ok);
+  const summary = `${a.name} · ${a.stage || a.parkName} · ${a.weekdays} ${a.hours}`;
+  const body = { profile_id: profileId, terms: true, consent: a.consent.map((c) => c && typeof c === "object" && ("id" in c) ? c.id : c) };
+  if (!live) {
+    beginAudit(paths.audit(), { kind: "activity.subscribe", command: "activity subscribe", tier: "T2", profile: profileName(ctx.flags.profile), meta: { activityId: id, profileId, ready } }).dryRun();
+    return {
+      data: { dryRun: true, intent, ready, summary, request: { method: "POST", path: `/api/profiles/${profileId}/schedules/${id}`, body }, checks, consent: a.consent, regulations: a.regulations },
+      human: () => [
+        bold("Vista previa — no se inscribió a nadie"),
+        `${muted("Qué")}  ${summary}`,
+        "",
+        ...checks.map((c) => `${c.ok ? ok("✓") : danger("✗")} ${c.name.padEnd(14)} ${muted(c.detail)}`),
+        "",
+        a.consent.length ? warn(`! Al confirmar aceptas ${a.consent.length} consentimiento(s) y los términos del IDRD.`) : "",
+        ready ? `${dim("Para inscribir de verdad:")}
+  idrd activity subscribe ${id} --person ${profileId} --yes --confirm ${strong(intent)}` : danger("No se puede inscribir mientras haya checks en rojo.")
+      ].filter(Boolean).join(`
+`),
+      nextSteps: ready ? [{ command: `idrd activity subscribe ${id} --person ${profileId} --yes --confirm ${intent}`, description: "INSCRIPCIÓN REAL (se puede deshacer con activity unsubscribe)" }] : []
+    };
+  }
+  if (k.active)
+    fail("safety/killswitch", "Killswitch activo: escrituras bloqueadas.", "Desactívalo con `idrd killswitch off`.");
+  const failed = checks.find((c) => !c.ok);
+  if (failed)
+    fail("safety/precheck", `No inscribo: ${failed.name} — ${failed.detail}`);
+  await approveGate({ cliName: "idrd", flags: { json: ctx.flags.json, noInput: ctx.flags.noInput } }, { title: "Inscripción", summary }, { trust: "T3", yes: true, confirm: str(ctx.args, "confirm"), confirmAgainst: intent });
+  const au = beginAudit(paths.audit(), { kind: "activity.subscribe", command: "activity subscribe", tier: "T2", profile: profileName(ctx.flags.profile), meta: { activityId: id, profileId } });
+  try {
+    const res = await subscribe(token, profileId, id, body);
+    au.complete({ details: res.details });
+    return {
+      data: { activityId: id, profileId, message: res.message, subscriptionId: res.details },
+      human: () => `${ok("✓")} ${res.message || "Preinscripción registrada."}${res.details ? ` ${muted(`(#${String(res.details)})`)}` : ""}
+  ${dim("Revisa tu correo o `idrd activity mine` para el estado.")}`,
+      nextSteps: [{ command: "idrd activity mine", description: "ver estado de la inscripción" }]
+    };
+  } catch (e) {
+    au.fail({ error: e instanceof AppError ? e.code : String(e) });
+    throw e;
+  }
+}
+async function activityUnsubscribe(ctx) {
+  const subId = positional(ctx.args, 0, "subscriptionId");
+  const { token } = await accessToken(ctx.flags.profile);
+  if (getKillswitchState(appHome()).active)
+    fail("safety/killswitch", "Killswitch activo: escrituras bloqueadas.", "Desactívalo con `idrd killswitch off`.");
+  await approveGate({ cliName: "idrd", flags: { json: ctx.flags.json, noInput: ctx.flags.noInput } }, { title: "Desinscribir", summary: `inscripción ${subId}` }, { trust: "T2", yes: ctx.args.yes === true });
+  const au = beginAudit(paths.audit(), { kind: "activity.unsubscribe", command: "activity unsubscribe", tier: "T2", profile: profileName(ctx.flags.profile), meta: { subscriptionId: subId } });
+  try {
+    await unsubscribe(token, subId);
+    au.complete({});
+  } catch (e) {
+    au.fail({ error: e instanceof AppError ? e.code : String(e) });
+    throw e;
+  }
+  return { data: { subscriptionId: subId, unsubscribed: true }, human: () => `${ok("✓")} Inscripción ${subId} retirada.` };
 }
 
 // src/idrd/availability.ts
@@ -1623,7 +2290,7 @@ function toWindow(e) {
   let to = Number(et.slice(0, 2)) + Number(et.slice(3, 5)) / 60;
   if (ed > sd)
     to = 24;
-  return to > from ? { from, to } : null;
+  return to > from ? { from, to, entry: e } : null;
 }
 function isReservable(e) {
   if (e.can === true)
@@ -1632,26 +2299,66 @@ function isReservable(e) {
     return false;
   return /disponible|reservable/i.test(`${e.category ?? ""} ${e.title ?? ""}`);
 }
+function num(v) {
+  if (v === null || v === undefined || v === "")
+    return;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : undefined;
+}
 function datesIn(entries) {
   return [...new Set(entries.map((e) => e.start.slice(0, 10)))].sort();
 }
-function hourSlots(entries, date) {
+function split(entries, date) {
   const day = entries.filter((e) => e.start.startsWith(date));
-  const open = day.filter(isReservable).map(toWindow).filter((w) => w !== null);
-  const taken = day.filter((e) => !isReservable(e)).map(toWindow).filter((w) => w !== null);
+  const win = (xs) => xs.map(toWindow).filter((w) => w !== null);
+  return { open: win(day.filter(isReservable)), taken: win(day.filter((e) => !isReservable(e))) };
+}
+function hourSlots(entries, date) {
+  const { open, taken } = split(entries, date);
   const hours = new Map;
   for (const w of open) {
     for (let h = Math.ceil(w.from);h + 1 <= w.to; h++) {
       const busy = taken.some((t) => t.from < h + 1 && t.to > h);
-      hours.set(h, (hours.get(h) ?? false) || !busy);
+      const prev = hours.get(h);
+      const slot = {
+        hour: h,
+        start: `${String(h).padStart(2, "0")}:00`,
+        end: `${String(h + 1).padStart(2, "0")}:00`,
+        available: (prev?.available ?? false) || !busy
+      };
+      const quota = num(w.entry.quota);
+      const used = num(w.entry.used_quota);
+      if (quota !== undefined)
+        slot.quota = quota;
+      if (used !== undefined)
+        slot.used = used;
+      hours.set(h, slot);
     }
   }
-  return [...hours.entries()].sort((a, b) => a[0] - b[0]).map(([hour, available]) => ({
-    hour,
-    start: `${String(hour).padStart(2, "0")}:00`,
-    end: `${String(hour + 1).padStart(2, "0")}:00`,
-    available
-  }));
+  for (const t of taken) {
+    if (num(t.entry.quota) === undefined)
+      continue;
+    for (let h = Math.ceil(t.from);h + 1 <= t.to; h++) {
+      if (hours.has(h))
+        continue;
+      hours.set(h, { hour: h, start: `${String(h).padStart(2, "0")}:00`, end: `${String(h + 1).padStart(2, "0")}:00`, available: false, quota: num(t.entry.quota), used: num(t.entry.used_quota) ?? num(t.entry.quota) });
+    }
+  }
+  return [...hours.values()].sort((a, b) => a.hour - b.hour);
+}
+function blocks(entries, date) {
+  const { open, taken } = split(entries, date);
+  const full = taken.filter((t) => num(t.entry.quota) !== undefined && !open.some((o) => o.from === t.from && o.to === t.to)).map((t) => ({ from: t.from, to: t.to, available: false, quota: num(t.entry.quota), used: num(t.entry.used_quota) ?? num(t.entry.quota) }));
+  return open.map((w) => {
+    const b = { from: w.from, to: w.to, available: !taken.some((t) => t.from < w.to && t.to > w.from) };
+    const quota = num(w.entry.quota);
+    const used = num(w.entry.used_quota);
+    if (quota !== undefined)
+      b.quota = quota;
+    if (used !== undefined)
+      b.used = used;
+    return b;
+  }).concat(full).sort((a, b) => a.from - b.from);
 }
 function freeRuns(slots) {
   const runs = [];
@@ -1796,11 +2503,20 @@ function rangesLabel(hours) {
 }
 
 // src/commands/read.ts
-var fold = (s) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+var fold2 = (s) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
 function courtId(raw) {
   const n = Number(raw);
   if (!Number.isInteger(n) || n <= 0)
-    fail("usage/bad-id", `Id de cancha inválido: ${raw}.`, "Usa el id de `idrd court list`.");
+    fail("usage/bad-id", `Id de espacio inválido: ${raw}.`, "Usa el id de `idrd court list`.");
+  return n;
+}
+function optInt(ctx, key) {
+  const v = str(ctx.args, key);
+  if (v === undefined)
+    return;
+  const n = Number(v);
+  if (!Number.isInteger(n) || n <= 0)
+    fail("usage/bad-arg", `--${key} debe ser un entero positivo (recibí ${v}).`);
   return n;
 }
 async function courtsFor(ctx) {
@@ -1810,37 +2526,53 @@ async function courtsFor(ctx) {
   if (!ctx.args.all)
     courts = courts.filter((c) => c.bookable);
   if (loc)
-    courts = courts.filter((c) => fold(c.locality).includes(fold(loc)) || fold(c.parkName).includes(fold(loc)));
+    courts = courts.filter((c) => fold2(c.locality).includes(fold2(loc)) || fold2(c.parkName).includes(fold2(loc)));
   return courts;
 }
 async function courtList(ctx) {
   const courts = await courtsFor(ctx);
   const sport = parseSport(str(ctx.args, "sport"));
+  const spec = SPORTS[sport];
+  const first = courts[0];
   return {
     data: courts,
-    human: (cs) => cs.length === 0 ? `No hay canchas de ${SPORTS[sport].label.toLowerCase()} con esos filtros.` : `${bold(`${SPORTS[sport].label}: ${cs.length} canchas`)}
+    human: (cs) => cs.length === 0 ? `No hay ${spec.label.toLowerCase()} con esos filtros.` : `${bold(`${spec.label}: ${cs.length} ${cs.length === 1 ? spec.noun : spec.plural}`)}
 
-` + table(["ID", "Parque", "Localidad", "Dirección"], cs.map((c) => [strong(String(c.id)), c.parkName, c.locality, muted(c.address)]), [8, 34, 14, 46]),
-    nextSteps: courts[0] ? [
-      { command: `idrd slot list ${courts[0].id} --date mañana --free`, description: "horas libres de una cancha" },
-      { command: `idrd find --sport ${sport} --date mañana --from 6 --to 9`, description: "buscar en todas a la vez" }
+` + table(["ID", "Parque", "Localidad", "Descripción"], cs.map((c) => [strong(String(c.id)), c.parkName, c.locality, muted(c.description || c.address)]), [8, 30, 14, 50]),
+    nextSteps: first ? spec.needs === "lane" ? [
+      { command: `idrd court lanes ${first.id}`, description: "carriles de una piscina" },
+      { command: `idrd find --sport pool --date mañana --from 6 --to 9`, description: "buscar cupos en todas las piscinas y carriles" }
+    ] : spec.needs === "sport" ? [
+      { command: `idrd court sports ${first.id}`, description: "deportes que admite el coliseo" },
+      { command: `idrd slot list ${first.id} --date mañana --free`, description: "horas libres" }
+    ] : [
+      { command: `idrd slot list ${first.id} --date mañana --free`, description: `horas libres de ${spec.noun === "cancha" ? "una cancha" : `un ${spec.noun}`}` },
+      { command: `idrd find --sport ${sport} --date mañana --from 6 --to 9`, description: "buscar en todos a la vez" }
     ] : []
   };
 }
 async function courtGet(ctx) {
   const id = courtId(positional(ctx.args, 0, "id"));
   const sched = await getSchedule(id, bogotaNow().date);
-  const park = Number.isFinite(sched.park.id) ? await getPark(sched.park.id).catch(() => null) : null;
+  const spec = SPORTS[sched.endowment.sport];
+  const [park, lanes, sports] = await Promise.all([
+    Number.isFinite(sched.park.id) ? getPark(sched.park.id).catch(() => null) : Promise.resolve(null),
+    spec.needs === "lane" ? listLanes(id).catch(() => []) : Promise.resolve([]),
+    spec.needs === "sport" ? listColiseumSports(id).catch(() => []) : Promise.resolve([])
+  ]);
   const { id: parkId, ...parkInfo } = sched.park;
-  const data = { court: { id, parkId, ...parkInfo }, park, endowment: sched.endowment };
+  const data = { court: { id, parkId, ...parkInfo }, kind: sched.endowment.sport, park, endowment: sched.endowment, lanes, sports };
   return {
     data,
     human: (d) => [
-      bold(`${d.endowment.description || "Cancha"} · ${d.court.name}`),
+      bold(`${d.endowment.description || spec.noun} · ${d.court.name}`),
+      `${muted("Tipo")}       ${spec.label}${spec.capacity === "quota" ? " (por cupos)" : ""}${spec.block ? " (por bloque)" : ""}`,
       `${muted("Dirección")}  ${d.court.address}${d.court.locality ? `, ${d.court.locality}` : ""}`,
       d.park?.hours ? `${muted("Parque")}     ${d.park.hours}` : "",
       `${muted("Superficie")} ${d.endowment.surface || "—"} · ${muted("Luz")} ${d.endowment.lighting || "—"} · ${muted("Estado")} ${d.endowment.status || "—"}`,
       d.park?.email ? `${muted("Contacto")}   ${d.park.email}` : "",
+      lanes.length ? `${muted("Carriles")}   ${lanes.map((l) => `${l.id} (${l.name} ${l.level} ${l.direction}, ${l.quota ?? "?"} cupos)`).join(" · ")}` : "",
+      sports.length ? `${muted("Deportes")}   ${sports.map((s) => `${s.id} ${s.name}`).join(" · ")}` : "",
       keyRules(d.endowment.rules).length ? `
 ${dim("Para reservar:")}
 ${keyRules(d.endowment.rules).map((l) => `  • ${l}`).join(`
@@ -1848,7 +2580,26 @@ ${keyRules(d.endowment.rules).map((l) => `  • ${l}`).join(`
 ${dim("  Reglas completas: idrd court get " + d.court.id + " --json (endowment.rules)")}` : ""
     ].filter(Boolean).join(`
 `),
-    nextSteps: [{ command: `idrd slot list ${id} --date mañana`, description: "ver horas" }]
+    nextSteps: lanes[0] ? [{ command: `idrd slot list ${id} --lane ${lanes[0].id} --date mañana`, description: "cupos por hora en un carril" }] : sports[0] ? [{ command: `idrd slot list ${id} --sport-id ${sports[0].id} --date mañana`, description: "horas para ese deporte" }] : [{ command: `idrd slot list ${id} --date mañana`, description: "ver horas" }]
+  };
+}
+async function courtLanes(ctx) {
+  const id = courtId(positional(ctx.args, 0, "id"));
+  const lanes = await listLanes(id);
+  return {
+    data: lanes,
+    human: () => lanes.length === 0 ? "Esta dotación no tiene carriles (¿no es una piscina?)." : table(["Carril", "Nombre", "Nivel", "Sentido", "Cupos"], lanes.map((l) => [strong(String(l.id)), l.name, l.level, l.direction, String(l.quota ?? "—")]), [8, 8, 10, 12, 6]),
+    nextSteps: lanes[0] ? [{ command: `idrd slot list ${id} --lane ${lanes[0].id} --date mañana --free`, description: "cupos libres en ese carril" }] : []
+  };
+}
+async function courtSports(ctx) {
+  const id = courtId(positional(ctx.args, 0, "id"));
+  const sports = await listColiseumSports(id);
+  return {
+    data: sports,
+    human: () => sports.length === 0 ? "Esta dotación no publica deportes (¿no es un coliseo?)." : sports.map((s) => `  ${strong(String(s.id).padEnd(4))} ${s.name}`).join(`
+`),
+    nextSteps: sports[0] ? [{ command: `idrd slot list ${id} --sport-id ${sports[0].id} --date mañana --free`, description: "horas libres para ese deporte" }] : []
   };
 }
 function keyRules(rules) {
@@ -1861,185 +2612,299 @@ function keyRules(rules) {
 function renderSlots(slots) {
   if (slots.length === 0)
     return dim("  Sin franjas reservables ese día.");
-  return slots.map((s) => `  ${s.available ? ok("●") : muted("○")} ${hh(s.hour)}–${hh(s.hour + 1)}  ${s.available ? ok("libre") : muted("reservado")}`).join(`
+  return slots.map((s) => {
+    const cap = s.quota !== undefined ? muted(`  ${Math.max(0, s.quota - (s.used ?? 0))}/${s.quota} cupos`) : "";
+    return `  ${s.available ? ok("●") : muted("○")} ${hh(s.hour)}–${hh(s.hour + 1)}  ${s.available ? ok("libre") : muted("sin cupo")}${cap}`;
+  }).join(`
 `);
+}
+function renderBlocks(bs) {
+  return bs.map((b) => `  ${b.available ? ok("●") : muted("○")} bloque ${hh(b.from)}–${hh(b.to)}  ${b.available ? ok("libre") : muted("reservado")}`).join(`
+`);
+}
+async function calendarOptions(ctx, id, sched) {
+  const spec = SPORTS[sched.endowment.sport];
+  const lane = optInt(ctx, "lane");
+  const sportId = optInt(ctx, "sportId");
+  const document = str(ctx.args, "document");
+  if (spec.needs === "lane" && lane === undefined) {
+    const lanes = await listLanes(id).catch(() => []);
+    fail("usage/missing-lane", "Las piscinas se consultan y reservan por carril.", lanes.length ? `Usa --lane <id>. Carriles: ${lanes.map((l) => `${l.id} (${l.name} ${l.level})`).join(", ")}.` : `Corre \`idrd court lanes ${id}\`.`);
+  }
+  return { lane, sportId, document };
 }
 async function slotList(ctx) {
   const id = courtId(positional(ctx.args, 0, "id"));
   const date = parseDate(str(ctx.args, "date"));
-  const sched = await getSchedule(id, date);
+  let sched = await getSchedule(id, date, { lane: optInt(ctx, "lane"), sportId: optInt(ctx, "sportId"), document: str(ctx.args, "document") });
+  const opts = await calendarOptions(ctx, id, sched);
+  const spec = SPORTS[sched.endowment.sport];
   const weekDates = datesIn(sched.entries);
   let slots = hourSlots(sched.entries, date);
   const runs = freeRuns(slots);
+  const bs = blocks(sched.entries, date);
   if (ctx.args.free)
     slots = slots.filter((s) => s.available);
   const outside = weekDates.length > 0 && !weekDates.includes(date);
-  const data = { courtId: id, date, weekDates, outsidePublishedWeek: outside, slots, freeRuns: runs };
+  const data = { courtId: id, kind: sched.endowment.sport, lane: opts.lane ?? null, sportId: opts.sportId ?? null, date, weekDates, outsidePublishedWeek: outside, slots, blocks: bs, freeRuns: runs };
   const first = runs[0];
+  const extra = `${opts.lane ? ` --lane ${opts.lane}` : ""}${opts.sportId ? ` --sport-id ${opts.sportId}` : ""}`;
+  const freeBlock = bs.find((b) => b.available);
   return {
     data,
     human: () => [
-      bold(`${sched.endowment.description || `Cancha ${id}`} · ${sched.park.name} · ${date}`),
+      bold(`${sched.endowment.description || `${spec.noun} ${id}`} · ${sched.park.name} · ${date}${opts.lane ? ` · carril ${opts.lane}` : ""}`),
       outside ? `${info("!")} El portal solo publica la semana ${weekDates[0]} a ${weekDates[weekDates.length - 1]}.` : "",
-      renderSlots(slots)
+      spec.block ? renderBlocks(bs) : renderSlots(slots),
+      spec.needs === "sport" && opts.sportId === undefined ? dim(`  Para reservar hace falta --sport-id (idrd court sports ${id}).`) : ""
     ].filter(Boolean).join(`
 `),
-    nextSteps: first ? [{ command: `idrd booking create ${id} --date ${date} --hour ${first[0]}${first.length > 1 ? " --hours 2" : ""}`, description: "vista previa de la reserva (no reserva nada)" }] : [{ command: `idrd find --date ${date}`, description: "buscar en otras canchas" }]
+    nextSteps: spec.block && freeBlock ? [{ command: `idrd booking create ${id} --date ${date} --hour ${freeBlock.from} --hours ${freeBlock.to - freeBlock.from}${extra}`, description: "vista previa de la reserva del bloque (no reserva nada)" }] : first ? [{ command: `idrd booking create ${id} --date ${date} --hour ${first[0]}${first.length > 1 && spec.capacity === "exclusive" && !spec.block ? " --hours 2" : ""}${extra}`, description: "vista previa de la reserva (no reserva nada)" }] : [{ command: `idrd find --sport ${sched.endowment.sport} --date ${date}`, description: "buscar en otros espacios" }]
   };
 }
 async function slotFind(ctx) {
   const sport = parseSport(str(ctx.args, "sport"));
+  const spec = SPORTS[sport];
   const date = parseDate(str(ctx.args, "date") ?? addDays(bogotaNow().date, 1));
   const from = str(ctx.args, "from") ? parseHour(str(ctx.args, "from")) : 0;
   const to = str(ctx.args, "to") ? parseHour(str(ctx.args, "to")) : 24;
   if (to <= from)
     fail("usage/bad-window", "--to debe ser mayor que --from.");
+  const sportId = optInt(ctx, "sportId");
   const courts = await courtsFor(ctx);
-  const concurrency = int(ctx.args, "concurrency", 4);
-  const results = [];
+  const concurrency = Math.max(1, Math.min(int(ctx.args, "concurrency", 4), 8));
+  let units = courts.map((court) => ({ court }));
   const failed = [];
-  let weekDates = [];
-  const queue = [...courts];
-  await Promise.all(Array.from({ length: Math.max(1, Math.min(concurrency, 8)) }, async () => {
-    for (let c = queue.shift();c; c = queue.shift()) {
+  if (spec.needs === "lane") {
+    const expanded = [];
+    await runQueue(courts, concurrency, async (c) => {
       try {
-        const sched = await getSchedule(c.id, date);
-        if (!weekDates.length)
-          weekDates = datesIn(sched.entries);
-        const free = hourSlots(sched.entries, date).filter((s) => s.available && s.hour >= from && s.hour + 1 <= to).map((s) => s.hour);
-        if (free.length)
-          results.push({ court: c, freeHours: free });
+        const lanes = (await listLanes(c.id)).filter((l) => l.enabled);
+        if (lanes.length === 0)
+          failed.push({ courtId: c.id, error: "sin carriles publicados" });
+        for (const lane of lanes)
+          expanded.push({ court: c, lane });
       } catch (e) {
         failed.push({ courtId: c.id, error: e instanceof Error ? e.message : String(e) });
       }
+    });
+    units = expanded;
+  }
+  const results = [];
+  let weekDates = [];
+  await runQueue(units, concurrency, async (u) => {
+    try {
+      const sched = await getSchedule(u.court.id, date, { lane: u.lane?.id, sportId });
+      if (!weekDates.length)
+        weekDates = datesIn(sched.entries);
+      const free = hourSlots(sched.entries, date).filter((s) => s.available && s.hour >= from && s.hour + 1 <= to);
+      if (free.length) {
+        const r = { court: u.court, freeHours: free.map((s) => s.hour) };
+        if (u.lane)
+          r.lane = u.lane;
+        const places = free.map((s) => s.quota !== undefined ? s.quota - (s.used ?? 0) : undefined).filter((n) => n !== undefined);
+        if (places.length)
+          r.places = Math.min(...places);
+        results.push(r);
+      }
+    } catch (e) {
+      failed.push({ courtId: u.court.id, lane: u.lane?.id, error: e instanceof Error ? e.message : String(e) });
     }
-  }));
-  results.sort((a, b) => (a.freeHours[0] ?? 99) - (b.freeHours[0] ?? 99) || a.court.parkName.localeCompare(b.court.parkName));
-  const data = { date, sport, window: { from, to }, weekDates, results, scanned: courts.length, failed };
+  });
+  results.sort((a, b) => (a.freeHours[0] ?? 99) - (b.freeHours[0] ?? 99) || a.court.parkName.localeCompare(b.court.parkName) || (a.lane?.id ?? 0) - (b.lane?.id ?? 0));
+  const data = { date, sport, window: { from, to }, weekDates, results, scanned: units.length, spaces: courts.length, failed };
   const best = results[0];
+  const bestExtra = best ? `${best.lane ? ` --lane ${best.lane.id}` : ""}${sportId ? ` --sport-id ${sportId}` : ""}` : "";
   return {
     data,
     human: () => {
       const span = from === 0 && to === 24 ? "todo el día" : `${hh(from)}–${hh(to)}`;
-      const head = bold(`${SPORTS[sport].label} · ${date} · ${span} · ${courts.length} canchas revisadas`);
+      const what = spec.needs === "lane" ? `${courts.length} piscinas · ${units.length} carriles revisados` : `${courts.length} ${courts.length === 1 ? spec.noun : spec.plural} revisad${spec.noun.endsWith("a") ? "as" : "os"}`;
+      const head = bold(`${spec.label} · ${date} · ${span} · ${what}`);
       if (!results.length)
         return `${head}
 
   Ninguna hora libre en esa franja.${failed.length ? dim(`
-  (${failed.length} canchas no respondieron)`) : ""}`;
+  (${failed.length} no respondieron)`) : ""}`;
+      const cols = spec.needs === "lane" ? ["ID", "Parque", "Carril", "Libre (mín. cupos)"] : ["ID", "Parque", "Localidad", "Libre"];
       return `${head}
 
-${table(["ID", "Parque", "Localidad", "Libre"], results.map((r) => [strong(String(r.court.id)), r.court.parkName, r.court.locality, ok(rangesLabel(r.freeHours))]), [8, 30, 14, 48])}${failed.length ? dim(`
+${table(cols, results.map((r) => [
+        strong(String(r.court.id)),
+        r.court.parkName,
+        spec.needs === "lane" ? `${r.lane?.id} (${r.lane?.name} ${r.lane?.level})` : r.court.locality,
+        ok(rangesLabel(r.freeHours)) + (r.places !== undefined ? muted(` (${r.places})`) : "")
+      ]), [8, 28, 18, 46])}${failed.length ? dim(`
 
-${failed.length} canchas no respondieron.`) : ""}`;
+${failed.length} no respondieron.`) : ""}`;
     },
-    nextSteps: best ? [{ command: `idrd booking create ${best.court.id} --date ${date} --hour ${best.freeHours[0]}`, description: "vista previa de la reserva (no reserva nada)" }] : [{ command: `idrd find --date ${addDays(date, 1)} --sport ${sport}`, description: "probar otro día" }]
+    nextSteps: best ? [{ command: `idrd booking create ${best.court.id} --date ${date} --hour ${best.freeHours[0]}${bestExtra}`, description: "vista previa de la reserva (no reserva nada)" }] : [{ command: `idrd find --date ${addDays(date, 1)} --sport ${sport}`, description: "probar otro día" }]
   };
 }
-
-// src/cli/agent/trust-ladder.ts
-import { createInterface } from "node:readline/promises";
-import { stdin as defaultStdin, stderr as defaultStderr } from "node:process";
-async function approveGate(ctx, preview, opts) {
-  if (opts.trust !== "T2" && opts.trust !== "T3")
-    return true;
-  if (opts.trust === "T3") {
-    const expected = opts.confirmAgainst;
-    if (!opts.confirm || !expected || opts.confirm !== expected) {
-      throw new AppError("approval/confirm-mismatch", {
-        name: "ApprovalConfirmMismatch",
-        human: "Confirmation value does not match the target id.",
-        hint: "Pass --yes --confirm <id> for T3 commands."
-      });
-    }
-  }
-  if (opts.yes === true)
-    return true;
-  const flags = ctx.flags ?? {};
-  const input = ctx.stdin ?? defaultStdin;
-  const output = ctx.stderr ?? defaultStderr;
-  const json = detectMode(flags) === "json";
-  const noInput = flags.noInput === true;
-  const inputTty = input.isTTY === true;
-  const outputTty = output.isTTY === true;
-  if (json || noInput || !inputTty || !outputTty) {
-    const cli = ctx.cliName ?? "this CLI";
-    throw new AppError("approval/required", {
-      name: "ApprovalRequired",
-      human: `Approval is required before ${cli} can run this operation.`,
-      hint: opts.trust === "T3" ? "Pass --yes --confirm <id>." : "Pass --yes."
-    });
-  }
-  output.write(`${preview.title}
-
-${renderPreview(preview)}
-
-`);
-  const rl = createInterface({ input, output });
-  try {
-    const answer = await rl.question("Continue? [y/N] ");
-    return answer.trim().toLowerCase() === "y" || answer.trim().toLowerCase() === "yes";
-  } finally {
-    rl.close();
-  }
-}
-function renderPreview(preview, opts = {}) {
-  const labelWidth = opts.labelWidth ?? 14;
-  const rows = Object.entries(preview.details ?? {}).map(([key, value]) => {
-    const lines = String(value ?? "").split(`
-`);
-    const [first = "", ...rest] = lines;
-    const label = `${key}:`.padEnd(labelWidth);
-    const body = [first, ...rest.map((line) => `${" ".repeat(labelWidth)}${line}`)].join(`
-`);
-    return `${label}${body}`;
-  });
-  return [
-    preview.summary,
-    ...rows.length > 0 ? ["", ...rows] : [],
-    ...preview.warning ? ["", preview.warning] : []
-  ].join(`
-`);
+async function runQueue(items, concurrency, fn) {
+  const queue = [...items];
+  await Promise.all(Array.from({ length: Math.max(1, concurrency) }, async () => {
+    for (let it = queue.shift();it !== undefined; it = queue.shift())
+      await fn(it);
+  }));
 }
 
-// src/cli/foundation/audit-lifecycle.ts
-import { appendFileSync, mkdirSync as mkdirSync3 } from "node:fs";
-import { randomUUID } from "node:crypto";
-import { join as join8 } from "node:path";
-function todayFilename() {
-  return `${new Date().toISOString().slice(0, 10)}.jsonl`;
+// src/commands/gym.ts
+function cop(n) {
+  const v = Number(n ?? 0);
+  return Number.isFinite(v) ? v.toLocaleString("es-CO", { style: "currency", currency: "COP", maximumFractionDigits: 0 }) : String(n);
 }
-function beginAudit(auditDir, record, opts = {}) {
-  const auditId = opts.auditId ?? randomUUID();
-  const started = Date.now();
-  const baseMeta = { ...record.meta ?? {}, audit_id: auditId };
-  appendLifecycleRecord(auditDir, record, "pending", baseMeta);
-  const finish = (result, meta = {}) => {
-    appendLifecycleRecord(auditDir, record, result, {
-      ...baseMeta,
-      ...meta,
-      duration_ms: Date.now() - started
-    });
-  };
+async function gymStatus(ctx) {
+  const id = courtId(positional(ctx.args, 0, "id"));
+  const { token } = await accessToken(ctx.flags.profile);
+  const st = await gymMembershipStatus(token, id);
+  const active = Boolean(st.active);
+  let reservations = null;
+  if (active && st.id !== undefined)
+    reservations = await membershipReservations(token, String(st.id)).catch(() => null);
+  const data = { gymId: id, active, status: st, reservations };
   return {
-    auditId,
-    complete: (meta) => finish("ok", meta),
-    fail: (meta) => finish("error", meta),
-    block: (meta) => finish("blocked", meta),
-    dryRun: (meta) => finish("dry-run", meta)
+    data,
+    human: () => active ? `${ok("●")} Mensualidad activa en el gimnasio ${bold(String(id))}${st.ends_at ? ` hasta ${st.ends_at}` : ""}${reservations ? `
+  ${muted(`Reservas con la mensualidad: ${Array.isArray(reservations.items) ? reservations.items.length : "?"} · cambios esta semana: ${String(reservations.changes_this_week ?? 0)}`)}` : ""}` : `${warn("○")} Sin mensualidad activa en el gimnasio ${bold(String(id))}.`,
+    nextSteps: active ? [{ command: `idrd gym availability ${id}`, description: "cupos por día para usar la mensualidad" }] : [{ command: `idrd gym quote ${id}`, description: "cuánto cuesta y qué vigencia tendría" }]
   };
 }
-function appendLifecycleRecord(auditDir, record, result, meta = {}) {
-  mkdirSync3(auditDir, { recursive: true });
-  const file = join8(auditDir, todayFilename());
-  const stored = {
-    ts: new Date().toISOString(),
-    ...record,
-    result,
-    meta
+async function gymQuote(ctx) {
+  const id = courtId(positional(ctx.args, 0, "id"));
+  const { token } = await accessToken(ctx.flags.profile);
+  const q = await gymMembershipQuote(token, id);
+  const data = { gymId: id, amount: Number(q.amount ?? 0), validFrom: q.valid_from ?? null, validTo: q.valid_to ?? null, concept: q.concept ?? null, quote: q };
+  return {
+    data,
+    human: () => [
+      bold(`Mensualidad · gimnasio ${id}`),
+      `${muted("Valor")}     ${cop(data.amount)}`,
+      `${muted("Vigencia")}  ${data.validFrom ?? "?"} → ${data.validTo ?? "?"}`,
+      data.concept ? `${muted("Concepto")}  ${String(data.concept)}` : ""
+    ].filter(Boolean).join(`
+`),
+    nextSteps: [{ command: `idrd gym buy ${id} --bank <código>`, description: "vista previa de la compra (no cobra nada)" }]
   };
-  appendFileSync(file, `${JSON.stringify(stored)}
-`, { mode: 384 });
+}
+async function gymAvailability(ctx) {
+  const id = courtId(positional(ctx.args, 0, "id"));
+  const { token } = await accessToken(ctx.flags.profile);
+  const av = await gymMembershipAvailability(token, id);
+  const days = Array.isArray(av.availability) ? av.availability : [];
+  return {
+    data: { gymId: id, days },
+    human: () => days.length === 0 ? "El portal no publicó disponibilidad para la mensualidad." : days.map((d) => {
+      const slots = Array.isArray(d.slots) ? d.slots : [];
+      return `${bold(String(d.date))}
+${slots.map((s) => `  ${Number(s.used ?? 0) >= Number(s.quota ?? 0) ? muted("○") : ok("●")} ${String(s.start_hour ?? s.start ?? "")} ${muted(`${String(s.used ?? 0)}/${String(s.quota ?? "?")}`)}`).join(`
+`)}`;
+    }).join(`
+`)
+  };
+}
+async function gymActive(ctx) {
+  const { token } = await accessToken(ctx.flags.profile);
+  const list = await gymMembershipActive(token);
+  return { data: list, human: () => JSON.stringify(list, null, 2) };
+}
+async function gymBuy(ctx) {
+  const id = courtId(positional(ctx.args, 0, "id"));
+  const bank = str(ctx.args, "bank");
+  const live = ctx.args.yes === true && !ctx.flags.dryRun;
+  const intent = `gym${id}@membership`;
+  const { token } = await accessToken(ctx.flags.profile);
+  const [u, quote, status] = await Promise.all([me(token), gymMembershipQuote(token, id), gymMembershipStatus(token, id).catch(() => ({}))]);
+  const amount = Number(quote.amount ?? 0);
+  const k = getKillswitchState(appHome());
+  const checks = [
+    { name: "killswitch", ok: !k.active, detail: k.active ? `activo: ${k.reason}` : "apagado" },
+    { name: "sesion", ok: u.hasProfile, detail: u.hasProfile ? u.email : `${u.email}: completa tu perfil en el portal` },
+    { name: "mensualidad", ok: !status.active, detail: status.active ? `ya tienes una activa hasta ${String(status.ends_at ?? "?")}` : "sin mensualidad activa" },
+    { name: "banco", ok: amount === 0 || Boolean(bank), detail: amount === 0 ? "gratis, no hace falta banco" : bank ? `PSE banco ${bank}` : "falta --bank <código> (idrd pay banks)" }
+  ];
+  const ready = checks.every((c) => c.ok);
+  const summary = `Mensualidad gimnasio ${id} · ${cop(amount)} · ${String(quote.valid_from ?? "?")} → ${String(quote.valid_to ?? "?")}`;
+  if (!live) {
+    beginAudit(paths.audit(), { kind: "gym.membership.buy", command: "gym buy", tier: "T3", profile: profileName(ctx.flags.profile), meta: { gymId: id, amount, ready } }).dryRun();
+    return {
+      data: { dryRun: true, intent, ready, summary, amount, quote, checks, warning: "La compra crea una mensualidad y una orden de pago; el portal no permite cancelarla desde la API." },
+      human: () => [
+        bold("Vista previa — no se compró nada"),
+        `${muted("Qué")}  ${summary}`,
+        "",
+        ...checks.map((c) => `${c.ok ? ok("✓") : danger("✗")} ${c.name.padEnd(13)} ${muted(c.detail)}`),
+        "",
+        ready ? `${dim("Para comprar de verdad:")}
+  idrd gym buy ${id}${bank ? ` --bank ${bank}` : ""} --yes --confirm ${strong(intent)}` : danger("No se puede comprar mientras haya checks en rojo.")
+      ].join(`
+`),
+      nextSteps: ready ? [{ command: `idrd gym buy ${id}${bank ? ` --bank ${bank}` : ""} --yes --confirm ${intent}`, description: "COMPRA REAL: crea la mensualidad y el link de pago" }] : []
+    };
+  }
+  if (k.active)
+    fail("safety/killswitch", "Killswitch activo: escrituras bloqueadas.", "Desactívalo con `idrd killswitch off`.");
+  const failed = checks.find((c) => !c.ok);
+  if (failed)
+    fail("safety/precheck", `No compro: ${failed.name} — ${failed.detail}`);
+  await approveGate({ cliName: "idrd", flags: { json: ctx.flags.json, noInput: ctx.flags.noInput } }, { title: "Compra de mensualidad", summary }, { trust: "T3", yes: true, confirm: str(ctx.args, "confirm"), confirmAgainst: intent });
+  const a = beginAudit(paths.audit(), { kind: "gym.membership.buy", command: "gym buy", tier: "T3", profile: profileName(ctx.flags.profile), meta: { gymId: id, amount, bank: bank ?? null } });
+  let membershipId = null;
+  let payment = null;
+  try {
+    const created = await gymMembershipPurchase(token, id, { init: true });
+    membershipId = created.membership_id === undefined || created.membership_id === null ? null : String(created.membership_id);
+    const ip = await publicIp();
+    const payload = membershipPaymentPayload(quote, u.profile, { membershipId, bankCode: amount === 0 ? "0" : bank, ip, email: u.email });
+    const res = await transferBank(token, payload, amount === 0);
+    const code = typeof res.payment === "string" ? res.payment : null;
+    payment = { paymentCode: code, bankUrl: typeof res.bank_url === "string" ? res.bank_url : null, receiptUrl: code ? `${RECEIPT_BASE}${code}` : null };
+    if (amount > 0 && !payment.bankUrl)
+      fail("upstream/pse-unavailable", "PSE no devolvió link de pago.", "Intenta más tarde; la mensualidad quedó creada sin pagar.");
+    a.complete({ membershipId, paymentCode: code });
+  } catch (e) {
+    a.fail({ error: e instanceof AppError ? e.code : String(e), membershipId });
+    if (membershipId) {
+      const err = e instanceof AppError ? e : new AppError("unknown", { name: "Unknown", human: String(e) });
+      payment = { ok: false, error: { code: err.code, message: err.human } };
+    } else
+      throw e;
+  }
+  const data = { gymId: id, membershipId, amount, payment };
+  return {
+    data,
+    human: () => [
+      `${ok("✓")} Mensualidad creada${membershipId ? `: ${bold(membershipId)}` : ""} · ${summary}`,
+      payment?.bankUrl ? `  ${bold("Link de pago PSE:")} ${String(payment.bankUrl)}` : "",
+      payment && payment.ok === false ? danger(`  ✗ La mensualidad existe pero falló el pago: ${payment.error.message}`) : "",
+      payment?.paymentCode ? dim(`  Cuando pagues: idrd gym activate ${id} --code ${String(payment.paymentCode)}`) : ""
+    ].filter(Boolean).join(`
+`),
+    nextSteps: payment?.paymentCode ? [
+      { command: `idrd pay status ${String(payment.paymentCode)}`, description: "ver si el pago quedó aprobado" },
+      { command: `idrd gym activate ${id} --code ${String(payment.paymentCode)}`, description: "activar la mensualidad con el pago aprobado" }
+    ] : []
+  };
+}
+async function gymActivate(ctx) {
+  const id = courtId(positional(ctx.args, 0, "id"));
+  const code = requireStr(ctx.args, "code");
+  const { token } = await accessToken(ctx.flags.profile);
+  await approveGate({ cliName: "idrd", flags: { json: ctx.flags.json, noInput: ctx.flags.noInput } }, { title: "Activar mensualidad", summary: `gimnasio ${id} · pago ${code}` }, { trust: "T2", yes: ctx.args.yes === true });
+  const a = beginAudit(paths.audit(), { kind: "gym.membership.activate", command: "gym activate", tier: "T2", profile: profileName(ctx.flags.profile), meta: { gymId: id, code } });
+  try {
+    await gymMembershipPurchase(token, id, { payment_code: code });
+    a.complete({});
+  } catch (e) {
+    a.fail({ error: e instanceof AppError ? e.code : String(e) });
+    throw e;
+  }
+  const st = await gymMembershipStatus(token, id).catch(() => ({}));
+  return {
+    data: { gymId: id, active: Boolean(st.active), status: st },
+    human: () => st.active ? `${ok("✓")} Mensualidad activada${st.ends_at ? ` hasta ${String(st.ends_at)}` : ""}.` : `${warn("!")} El portal aceptó el código pero aún no reporta la mensualidad activa.`,
+    nextSteps: [{ command: `idrd gym status ${id}`, description: "confirmar estado" }]
+  };
 }
 
 // src/cli/platform/open-url.ts
@@ -2139,8 +3004,14 @@ var RULES = {
 function checkBookingRules(input) {
   const v = [];
   const now = bogotaNow();
-  if (input.hours < 1 || input.hours > RULES.maxContinuousHours) {
+  const court = input.court ?? true;
+  if (input.hours < 1)
+    v.push({ rule: "min-hours", message: "La reserva debe durar al menos 1 hora." });
+  if (court && input.hours > RULES.maxContinuousHours) {
     v.push({ rule: "max-continuous-hours", message: `Máximo ${RULES.maxContinuousHours} horas continuas por día (pediste ${input.hours}).` });
+  }
+  if (!court && input.maxHours !== undefined && input.hours > input.maxHours) {
+    v.push({ rule: "within-block", message: `El bloque publicado dura ${input.maxHours} h (pediste ${input.hours}).` });
   }
   if (input.startHour + input.hours > 24) {
     v.push({ rule: "same-day", message: "La reserva debe terminar el mismo día." });
@@ -2156,7 +3027,7 @@ function checkBookingRules(input) {
   const advance = (startMs - nowMs) / 3600000;
   if (advance < 0) {
     v.push({ rule: "in-the-past", message: `${input.date} ${hourLabel(input.startHour)} ya pasó.` });
-  } else if (advance < RULES.minAdvanceHours) {
+  } else if (court && advance < RULES.minAdvanceHours) {
     v.push({ rule: "min-advance", message: `Se reserva con mínimo ${RULES.minAdvanceHours} h de anticipación (faltan ${advance.toFixed(1)} h).` });
   }
   if (now.isoWeekday === 1 && now.hour < RULES.mondayOpenHour) {
@@ -2177,52 +3048,97 @@ function audit(ctx, kind, command, tier, meta) {
 async function bookingCreate(ctx) {
   const courtId2 = Number(positional(ctx.args, 0, "id"));
   if (!Number.isInteger(courtId2) || courtId2 <= 0)
-    fail("usage/bad-id", "Id de cancha inválido.");
+    fail("usage/bad-id", "Id de espacio inválido.");
   const date = parseDate(requireStr(ctx.args, "date"));
-  const startHour = parseHour(requireStr(ctx.args, "hour"));
-  const hours = int(ctx.args, "hours", 1);
   const bank = str(ctx.args, "bank");
-  const intent = `${courtId2}@${date}T${String(startHour).padStart(2, "0")}x${hours}`;
   const live = ctx.args.yes === true && !ctx.flags.dryRun;
+  const probe = await getSchedule(courtId2, date, { lane: int(ctx.args, "lane"), sportId: int(ctx.args, "sportId"), document: str(ctx.args, "document") });
+  const sport = probe.endowment.sport;
+  const spec = SPORTS[sport];
+  const cal = await calendarOptions(ctx, courtId2, probe);
+  const sched = probe;
+  const weekDates = datesIn(sched.entries);
+  const dayBlocks = blocks(sched.entries, date);
+  let startHour;
+  let hours;
+  if (spec.block) {
+    const block = str(ctx.args, "hour") ? dayBlocks.find((b) => b.from === parseHour(str(ctx.args, "hour"))) : dayBlocks.find((b) => b.available) ?? dayBlocks[0];
+    if (!block)
+      fail("slot/unavailable", `No hay bloques publicados para ${date}.`, `Mira otros días con \`idrd slot list ${courtId2} --date <día>\`.`);
+    startHour = block.from;
+    hours = int(ctx.args, "hours", block.to - block.from);
+  } else {
+    startHour = parseHour(requireStr(ctx.args, "hour"));
+    hours = int(ctx.args, "hours", 1);
+  }
+  const intent = `${courtId2}@${date}T${String(startHour).padStart(2, "0")}x${hours}${cal.lane ? `L${cal.lane}` : ""}${cal.sportId ? `S${cal.sportId}` : ""}`;
   const checks = [];
   const k = getKillswitchState(appHome());
   checks.push({ name: "killswitch", ok: !k.active, detail: k.active ? `activo: ${k.reason}` : "apagado" });
-  const sched = await getSchedule(courtId2, date);
-  const weekDates = datesIn(sched.entries);
-  const violations = checkBookingRules({ date, startHour, hours, weekDates });
-  checks.push({ name: "reglas", ok: violations.length === 0, detail: violations.map((v) => v.message).join(" ") || "cumple las reglas del portal" });
+  const containing = dayBlocks.find((b) => b.from <= startHour && b.to >= startHour + hours);
+  const violations = checkBookingRules({
+    date,
+    startHour,
+    hours,
+    weekDates,
+    court: spec.capacity === "exclusive" && !spec.block && !spec.needs,
+    maxHours: containing ? containing.to - containing.from : undefined
+  });
+  if (!containing && !(spec.capacity === "exclusive" && !spec.block && !spec.needs)) {
+    violations.push({ rule: "within-block", message: `${hh(startHour)}–${hh(startHour + hours)} no cabe en un bloque publicado (${dayBlocks.map((b) => `${hh(b.from)}–${hh(b.to)}`).join(", ") || "ninguno"}).` });
+  }
+  checks.push({ name: "reglas", ok: violations.length === 0, detail: violations.map((v) => v.message).join(" ") || (spec.block ? "bloque completo, como lo publica el portal" : "cumple las reglas del portal") });
   const slots = hourSlots(sched.entries, date);
   const wanted = Array.from({ length: hours }, (_, i) => startHour + i);
   const missing = wanted.filter((h) => !slots.find((s) => s.hour === h && s.available));
+  const places = Math.min(...wanted.map((h) => {
+    const sl = slots.find((s) => s.hour === h);
+    return sl?.quota !== undefined ? sl.quota - (sl.used ?? 0) : Infinity;
+  }));
   checks.push({
     name: "disponibilidad",
     ok: missing.length === 0,
-    detail: missing.length ? `ocupado o no reservable: ${missing.map(hh).join(", ")}` : `libre ${hh(startHour)}–${hh(startHour + hours)} (verificado en vivo)`
+    detail: missing.length ? `${spec.capacity === "quota" ? "sin cupo" : "ocupado o no reservable"}: ${missing.map(hh).join(", ")}` : `libre ${hh(startHour)}–${hh(startHour + hours)}${Number.isFinite(places) ? ` · ${places} cupos` : ""} (verificado en vivo)`
   });
-  let document;
+  if (spec.needs === "sport") {
+    checks.push({ name: "deporte", ok: cal.sportId !== undefined, detail: cal.sportId !== undefined ? `sport_id ${cal.sportId}` : `falta --sport-id (idrd court sports ${courtId2})` });
+  }
+  const adultDoc = str(ctx.args, "adultDocument");
+  const adultType = str(ctx.args, "adultDocumentType");
+  const adultName = str(ctx.args, "adultName");
+  const adult = Boolean(adultDoc || adultType || adultName);
+  if (adult && !(adultDoc && adultType && adultName)) {
+    fail("usage/missing-flag", "El adulto responsable necesita --adult-document-type, --adult-document y --adult-name.");
+  }
+  let document = str(ctx.args, "document");
   let who = "";
   try {
     const { token: token2 } = await accessToken(ctx.flags.profile);
     const u = await me(token2);
-    document = u.document ?? undefined;
-    who = `${u.email}${u.hasProfile ? "" : " (perfil incompleto)"}`;
+    document = document ?? u.document ?? undefined;
+    who = `${u.email}${u.hasProfile ? "" : " (perfil incompleto)"}${str(ctx.args, "document") ? ` · beneficiario ${document}` : ""}`;
     checks.push({ name: "sesion", ok: u.hasProfile, detail: u.hasProfile ? who : `${who}: completa tu perfil en el portal` });
   } catch (e) {
     checks.push({ name: "sesion", ok: false, detail: e instanceof AppError ? e.human : String(e) });
+  }
+  if (sport === "pool" && CEFE_POOL_IDS.has(courtId2) && str(ctx.args, "document") && !adult) {
+    checks.push({ name: "acudiente", ok: true, detail: "sin adulto responsable (obligatorio si el beneficiario tiene entre 5 y 12 años)" });
   }
   const body = {
     date,
     start_hour: hourLabel(startHour),
     final_hour: hourLabel(startHour + hours),
-    sport_id: null,
-    lane: null,
+    sport_id: cal.sportId ?? null,
+    lane: cal.lane ?? null,
     document,
-    is_a_responsible_adult_required: false
+    is_a_responsible_adult_required: adult,
+    ...adult ? { document_type_responsible_adult: adultType, document_number_responsible_adult: adultDoc, full_name_responsible_adult: adultName } : {}
   };
   const ready = checks.every((c) => c.ok);
-  const where = `${sched.endowment.description || `Cancha ${courtId2}`} · ${sched.park.name}`;
+  const where = `${sched.endowment.description || `${spec.noun} ${courtId2}`} · ${sched.park.name}${cal.lane ? ` · carril ${cal.lane}` : ""}${cal.sportId ? ` · deporte ${cal.sportId}` : ""}`;
+  const argv = `${courtId2} --date ${date} --hour ${startHour}${hours > 1 || spec.block ? ` --hours ${hours}` : ""}${cal.lane ? ` --lane ${cal.lane}` : ""}${cal.sportId ? ` --sport-id ${cal.sportId}` : ""}${str(ctx.args, "document") ? ` --document ${document}` : ""}${adult ? ` --adult-document-type ${adultType} --adult-document ${adultDoc} --adult-name "${adultName}"` : ""}`;
   if (!live) {
-    audit(ctx, "booking.create", "booking create", "T3", { courtId: courtId2, date, startHour, hours, ready }).dryRun();
+    audit(ctx, "booking.create", "booking create", "T3", { courtId: courtId2, kind: sport, date, startHour, hours, lane: cal.lane ?? null, sportId: cal.sportId ?? null, ready }).dryRun();
     const preview = {
       dryRun: true,
       intent,
@@ -2245,26 +3161,26 @@ async function bookingCreate(ctx) {
         warn(`! ${preview.warning}`),
         ready ? `
 ${dim("Para reservar de verdad:")}
-  idrd booking create ${courtId2} --date ${date} --hour ${startHour}${hours > 1 ? ` --hours ${hours}` : ""} --yes --confirm ${strong(intent)}` : danger(`
+  idrd booking create ${argv} --yes --confirm ${strong(intent)}` : danger(`
 No se puede reservar mientras haya checks en rojo.`)
       ].join(`
 `),
-      nextSteps: ready ? [{ command: `idrd booking create ${courtId2} --date ${date} --hour ${startHour}${hours > 1 ? ` --hours ${hours}` : ""} --yes --confirm ${intent}`, description: "RESERVA REAL e irreversible" }] : checks.find((c) => c.name === "sesion" && !c.ok) ? [{ command: "idrd auth login --email <correo>", description: "iniciar sesión y volver a previsualizar" }] : checks.find((c) => c.name === "disponibilidad" && !c.ok) ? [{ command: `idrd slot list ${courtId2} --date ${date} --free`, description: "ver horas libres de esa cancha" }] : []
+      nextSteps: ready ? [{ command: `idrd booking create ${argv} --yes --confirm ${intent}`, description: "RESERVA REAL e irreversible" }] : checks.find((c) => c.name === "sesion" && !c.ok) ? [{ command: "idrd auth login --email <correo>", description: "iniciar sesión y volver a previsualizar" }] : checks.find((c) => c.name === "disponibilidad" && !c.ok) ? [{ command: `idrd slot list ${courtId2} --date ${date} --free${cal.lane ? ` --lane ${cal.lane}` : ""}${cal.sportId ? ` --sport-id ${cal.sportId}` : ""}`, description: "ver horas libres de ese espacio" }] : []
     };
   }
   assertWritable();
   const failed = checks.find((c) => !c.ok);
   if (failed) {
-    const code = failed.name === "disponibilidad" ? "slot/unavailable" : failed.name === "reglas" ? "rule/violation" : failed.name === "sesion" ? "auth/required" : "safety/precheck";
+    const code = failed.name === "disponibilidad" ? "slot/unavailable" : failed.name === "reglas" ? "rule/violation" : failed.name === "sesion" ? "auth/required" : failed.name === "deporte" ? "usage/missing-flag" : "safety/precheck";
     fail(code, `No reservo: ${failed.name} — ${failed.detail}`);
   }
   await approveGate({ cliName: "idrd", flags: { json: ctx.flags.json, noInput: ctx.flags.noInput } }, { title: "Reserva irreversible", summary: `${where} · ${date} ${hourLabel(startHour)}–${hourLabel(startHour + hours)}` }, { trust: "T3", yes: true, confirm: str(ctx.args, "confirm"), confirmAgainst: intent });
   const { token } = await accessToken(ctx.flags.profile);
-  const a = audit(ctx, "booking.create", "booking create", "T3", { courtId: courtId2, date, startHour, hours, intent });
+  const a = audit(ctx, "booking.create", "booking create", "T3", { courtId: courtId2, kind: sport, date, startHour, hours, lane: cal.lane ?? null, sportId: cal.sportId ?? null, intent });
   let booking;
   try {
     const raw = await createBooking(token, courtId2, body);
-    booking = normalizeBooking(raw, { courtId: courtId2, date, startHour: body.start_hour, finalHour: body.final_hour });
+    booking = normalizeBooking(raw, { courtId: courtId2, date, startHour: body.start_hour, finalHour: body.final_hour, lane: cal.lane ?? null, sportId: cal.sportId ?? null });
     saveBooking(ctx.flags.profile, booking);
     a.complete({ bookingId: booking.bookingId, amount: booking.amount, free: booking.free });
   } catch (e) {
@@ -2286,6 +3202,7 @@ No se puede reservar mientras haya checks en rojo.`)
     data,
     human: () => [
       `${ok("✓")} Reserva creada: ${bold(booking.bookingId)} · ${where} · ${date} ${booking.startHour}–${booking.finalHour}`,
+      booking.raw.adult_booking_id ? `  ${info("i")} El portal creó también la reserva del acudiente (${String(booking.raw.adult_booking_id)}).` : "",
       booking.free ? `  ${ok("Gratis.")} ${payment?.receiptUrl ? `Comprobante: ${payment.receiptUrl}` : ""}` : `  Valor: ${bold(`$${booking.amount}`)} ${muted(booking.concept)}`,
       payment?.bankUrl ? `  ${bold("Link de pago PSE:")} ${payment.bankUrl}` : "",
       payment && payment.ok === false ? danger(`  ✗ La reserva existe, pero falló el paso de ${booking.free ? "confirmación" : "pago"}: ${payment.error.message}`) : ""
@@ -2369,6 +3286,8 @@ async function payStatus(ctx) {
 var HANDLERS = {
   "court list": courtList,
   "court get": courtGet,
+  "court lanes": courtLanes,
+  "court sports": courtSports,
   "slot list": slotList,
   "slot find": slotFind,
   "auth login": authLogin,
@@ -2379,11 +3298,28 @@ var HANDLERS = {
   "pay banks": payBanks,
   "pay pse": payPse,
   "pay status": payStatus,
+  "pay pending": payPending,
+  "pay history": payHistory,
+  "gym status": gymStatus,
+  "gym quote": gymQuote,
+  "gym availability": gymAvailability,
+  "gym active": gymActive,
+  "gym buy": gymBuy,
+  "gym activate": gymActivate,
+  "activity list": activityList,
+  "activity get": activityGet,
+  "activity programs": activityPrograms,
+  "activity stages": activityStages,
+  "activity categories": activityCategories,
+  "activity mine": activityMine,
+  "activity subscribe": activitySubscribe,
+  "activity unsubscribe": activityUnsubscribe,
+  "profile list": profileList,
   doctor,
   killswitch,
   schema
 };
-var ALIASES2 = { find: ["slot", "find"] };
+var ALIASES2 = { find: ["slot", "find"], space: ["court"], activities: ["activity"] };
 async function main(argv) {
   const args = parseArgs(argv);
   const flags = parseGlobalFlags(args);

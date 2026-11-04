@@ -5,7 +5,7 @@ import { positional, str } from "../core/args.js";
 import { EXIT, fail } from "../core/errors.js";
 import { appHome } from "../core/paths.js";
 import { SCHEMA_VERSION } from "../core/output.js";
-import { listBookings, listCourts, logout, me } from "../idrd/api.js";
+import { listBookings, listCourts, logout, me, paymentHistory, pendingToPay } from "../idrd/api.js";
 import { accessToken, currentSession, login, logoutLocal, resolvePassword, storedEmail } from "../idrd/auth.js";
 import { localBookings } from "../idrd/payment.js";
 import { COMMANDS, GLOBAL_FLAGS } from "../registry.js";
@@ -84,6 +84,25 @@ export async function bookingList(ctx: Ctx) {
   };
 }
 
+export async function payPending(ctx: Ctx) {
+  const { token } = await accessToken(ctx.flags.profile);
+  const items = await pendingToPay(token);
+  return {
+    data: items,
+    human: () => (items.length === 0 ? `${ok("✓")} No tienes pagos pendientes.` : `${bold(`Pagos pendientes: ${items.length}`)}\n${items.map((i) => `  • ${JSON.stringify(i).slice(0, 160)}`).join("\n")}`),
+    nextSteps: items.length ? [{ command: "idrd pay pse <bookingId> --bank <código> --yes", description: "pagar una reserva creada desde este equipo" }] : [],
+  };
+}
+
+export async function payHistory(ctx: Ctx) {
+  const { token } = await accessToken(ctx.flags.profile);
+  const items = await paymentHistory(token);
+  return {
+    data: items,
+    human: () => (items.length === 0 ? "Sin pagos registrados." : `${bold(`Pagos: ${items.length}`)}\n${items.slice(0, 50).map((i) => `  • ${JSON.stringify(i).slice(0, 160)}`).join("\n")}`),
+  };
+}
+
 export async function doctor(ctx: Ctx) {
   const checks: Array<() => Promise<DoctorCheck>> = [
     async () => {
@@ -148,7 +167,7 @@ export async function schema() {
 
 export function helpText(): string {
   const lines = [bold("idrd") + dim(" — CLI no oficial del Portal Ciudadano IDRD (Bogotá)"), "", bold("Comandos:")];
-  for (const c of COMMANDS) lines.push(`  ${c.name.padEnd(16)} ${c.summary}${c.trust === "T3" ? warn("  [irreversible]") : ""}`);
+  for (const c of COMMANDS) lines.push(`  ${c.name.padEnd(21)} ${c.summary}${c.trust === "T3" ? warn("  [irreversible]") : ""}`);
   lines.push("", bold("Globales:"), ...GLOBAL_FLAGS.map((f) => `  ${f.flag.padEnd(20)} ${f.description}`));
   lines.push("", dim("Detalle de un comando: idrd <comando> --help · Contrato para agentes: idrd schema"));
   return lines.join("\n");

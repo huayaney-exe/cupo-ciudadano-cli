@@ -22,10 +22,13 @@ export type BookingRecord = {
   serviceId: unknown;
   holdUntil: string | null;
   createdAt: string;
+  /** Pools: lane booked. Coliseums: sport booked (also sent to the payment gateway). */
+  lane?: number | null;
+  sportId?: number | null;
   raw: Record<string, unknown>;
 };
 
-export function normalizeBooking(raw: Record<string, unknown>, ctx: { courtId: number; date: string; startHour: string; finalHour: string }): BookingRecord {
+export function normalizeBooking(raw: Record<string, unknown>, ctx: { courtId: number; date: string; startHour: string; finalHour: string; lane?: number | null; sportId?: number | null }): BookingRecord {
   const id = raw.booking_id ?? raw.id ?? raw.citizen_schedule_id;
   if (id === undefined || id === null) fail("upstream/bad-booking", "El portal respondió sin id de reserva.", cleanText(JSON.stringify(raw), 200));
   const amount = Number(raw.amount ?? 0);
@@ -43,6 +46,8 @@ export function normalizeBooking(raw: Record<string, unknown>, ctx: { courtId: n
     // The portal shows a countdown from created_at to complete payment.
     holdUntil: typeof raw.created_at === "string" ? raw.created_at : null,
     createdAt: new Date().toISOString(),
+    lane: ctx.lane ?? null,
+    sportId: ctx.sportId ?? null,
     raw,
   };
 }
@@ -114,6 +119,54 @@ export function paymentPayload(b: BookingRecord, opts: { bankCode: string; ip: s
     BankTypeSelected: b.free ? "0" : opts.bankCode,
     redirect_url: RECEIPT_BASE,
     ip_address: opts.ip,
+    sport_id: b.sportId ?? null,
+  };
+}
+
+/**
+ * A gym membership is paid like a booking but without a reservation: the SPA
+ * deletes `reservationId`, adds `membership_id`, and fills the payer from the
+ * account's profile and the quote (amount, park, service, concept).
+ */
+export function membershipPaymentPayload(
+  quote: Record<string, unknown>,
+  profile: Record<string, unknown>,
+  opts: { membershipId: number | string | null; bankCode: string; ip: string; email: string },
+): Record<string, unknown> {
+  const s = (v: unknown) => (v === null || v === undefined ? null : String(v));
+  const person = (profile.person_type_id as string) || "N";
+  const amount = Number(quote.amount ?? 0);
+  const base = {
+    permitTypeSelected: "PO",
+    permitNumber: "999",
+    name: profile.name ?? profile.first_name ?? null,
+    lastName: profile.surname ?? profile.last_name ?? null,
+    phone: s(profile.phone ?? profile.mobile_phone),
+    email: opts.email,
+    address: profile.address ?? null,
+    documentTypeSelected: profile.document_type_id ?? null,
+    document: profile.document ?? null,
+    parkSelected: quote.park_id ?? null,
+    serviceParkSelected: quote.service_id ?? null,
+    isTheSame: true,
+    concept: quote.concept ?? "Mensualidad Gimnasio",
+    totalPay: amount,
+    typePersonSelected: person,
+    typePersonSelectedPayer: person,
+    BankTypeSelected: amount === 0 ? "0" : opts.bankCode,
+    redirect_url: RECEIPT_BASE,
+    ip_address: opts.ip,
     sport_id: null,
+    ...(opts.membershipId ? { membership_id: opts.membershipId } : {}),
+  };
+  return {
+    ...base,
+    documentTypeSelectedPayer: base.documentTypeSelected,
+    documentPayer: base.document,
+    namePayer: base.name,
+    lastNamePayer: base.lastName,
+    phonePayer: base.phone,
+    emailPayer: base.email,
+    addressPayer: base.address,
   };
 }

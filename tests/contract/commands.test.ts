@@ -28,6 +28,27 @@ describe("read commands (no auth)", () => {
     const all = await run(["court", "list", "--all", "--json"]);
     expect(all.json.data).toHaveLength(2);
   });
+  test("court list reads every page, not just the first 10", async () => {
+    // 37 courts; the mock caps pages at 10 rows even when asked for more, like a server that ignores per_page.
+    const courts = Array.from({ length: 37 }, (_, i) => ({
+      park_endowment_id: 20000 + i, id: 20000 + i, park_id: 1, park_name: `PARQUE ${i}`, park_code: `01-${i}`,
+      park_address: "CL 1", locality: i === 36 ? "CHAPINERO" : "SUBA", upz: "X", endowment_description: "CANCHA", for_booking: 1,
+    }));
+    const calls = mockPortal({ courts, courtPageCap: 10 });
+    const r = await run(["court", "list", "--json"]);
+    expect(r.code).toBe(0);
+    expect(r.json.data).toHaveLength(37);
+    expect(calls.filter((c) => c.url.startsWith("/api/parks/tennis-courts")).map((c) => new URL(c.url, "http://x").searchParams.get("page"))).toEqual(["1", "2", "3", "4"]);
+    const last = await run(["court", "list", "--locality", "chapinero", "--json"]);
+    expect(last.json.data.map((c: any) => c.id)).toEqual([20036]);
+  });
+  test("court list fetches a single large page when the server honours per_page", async () => {
+    const courts = Array.from({ length: 88 }, (_, i) => ({ park_endowment_id: 30000 + i, id: 30000 + i, park_id: 1, park_name: `P${i}`, park_code: "x", park_address: "y", locality: "L", upz: "U", endowment_description: "C", for_booking: 1 }));
+    const calls = mockPortal({ courts });
+    const r = await run(["court", "list", "--json"]);
+    expect(r.json.data).toHaveLength(88);
+    expect(calls.filter((c) => c.url.startsWith("/api/parks/tennis-courts"))).toHaveLength(1);
+  });
   test("slot list subtracts reservations", async () => {
     mockPortal();
     const r = await run(["slot", "list", "11537", "--date", "2026-11-05", "--json"]);

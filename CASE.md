@@ -1,6 +1,6 @@
 ---
 cli: idrd
-target: Bogotá IDRD Portal Ciudadano — public park courts (tennis, pádel, pickleball, soccer), availability, booking, PSE payment link
+target: Bogotá IDRD Portal Ciudadano — every bookable space (courts, pools per lane, grills, CEFE gyms by hour or membership, coliseums per sport), sport schools and programs with enrolment, account payments, PSE payment link
 origin: discovered
 terrain: B
 built: 2026-11-03
@@ -12,11 +12,19 @@ distribution: source (Node bundle via bun build, npm link)
 
 ## What it does
 
-Fifteen commands over a Vue SPA's REST backend: list courts per sport, read real
-availability (reservable minus reserved) for one court or scan all of them,
-log in with the portal's OAuth password grant, preview and create a booking,
-and return the PSE `bank_url` for paid bookings. Free bookings are confirmed
-automatically. Payment itself stays with the human.
+Thirty-four commands over a Vue SPA's REST backend. Spaces: list every kind the
+portal books (5 court sports, pools, grills, gyms, coliseums), read real
+availability (reservable minus reserved; places for capacity spaces; blocks for
+grills) for one space or scan all of them (pools lane by lane), preview and
+create a booking, return the PSE `bank_url` for paid ones. Gyms: membership
+status, quote, availability, purchase and activation. Activities: schools and
+programs with filters, detail, programs, stages (the CEFE), categories,
+profiles, enrol and un-enrol. Account: pending payments and history. Free
+bookings are confirmed automatically. Payment itself stays with the human.
+
+The second pass (same day) grew the surface from 15 to 34 commands after the
+owner asked for 100% of the portal's services. The first pass had covered 50 of
+320 courts (page 1 of a paginator) and one of three service families.
 
 ## Contract origin
 
@@ -88,6 +96,14 @@ refuses instead.
 - **Double-encoded UTF-8 upstream** (`NÂ° 1`, cp1252 `PEÃ‘ALOSA`). Repaired
   only when the re-decode is valid, so correct text is never touched.
 
+- **Court lists were silently truncated to the first page.** Every list
+  endpoint is a Laravel paginator (10 per page); recon's own fixture said
+  `total: 88` for tennis but both recon and the build read `data` and ignored
+  `meta`. The CLI scanned 50 of 320 courts and told a human there was nothing
+  in Chapinero. The tell was five sports returning exactly 10 rows each. Fixed
+  with `per_page` plus a `last_page` loop and two contract tests (a mock that
+  caps pages, one that honours `per_page`).
+
 ## What the human-output pass caught that 63 green tests did not
 
 - Per-hour lists ("4:00 PM, 5:00 PM, 6:00 PM…") truncated at column width →
@@ -119,7 +135,8 @@ derived from frontend code.
 - Code: `src` (CLI), `src/cli` (cligentic blocks)
 - Contract: `idrd schema`; shapes in `src/registry.ts`
 - Agent manual: `skills/idrd/SKILL.md` (frontmatter validated)
-- Tests: 66 pass, 0 fail across 6 files (unit, contract with mock portal, agent-first subprocess rules incl. real-TTY checks) — `bun run check`
+- Tests: 82 pass, 0 fail across 7 files (unit, contract with mock portal, agent-first subprocess rules incl. real-TTY checks) — `bun run check`
 - Linked globally (`npm link`) and run by name against the live portal for all
-  five sports, PSE banks, and a 404 path
+  nine space kinds, pool lanes, coliseum sports, activities, PSE banks, and a
+  404 path
 - Design and decisions: `DESIGN.md`; friction log: `friction.md`

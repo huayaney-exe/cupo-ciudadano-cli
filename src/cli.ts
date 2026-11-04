@@ -3,15 +3,19 @@ import { parseGlobalFlags, type GlobalFlags } from "./cli/foundation/global-flag
 import { parseArgs } from "./core/args.js";
 import { AppError, EXIT, exitCodeFor, toAppError } from "./core/errors.js";
 import { emitError, emitResult, isJson } from "./core/output.js";
-import { authLogin, authLogout, authStatus, bookingList, commandHelp, doctor, helpText, killswitch, schema, VERSION } from "./commands/account.js";
+import { authLogin, authLogout, authStatus, bookingList, commandHelp, doctor, helpText, killswitch, payHistory, payPending, schema, VERSION } from "./commands/account.js";
+import { activityCategories, activityGet, activityList, activityMine, activityPrograms, activityStages, activitySubscribe, activityUnsubscribe, profileList } from "./commands/activities.js";
+import { gymActivate, gymActive, gymAvailability, gymBuy, gymQuote, gymStatus } from "./commands/gym.js";
 import type { Handler } from "./commands/context.js";
-import { courtGet, courtList, slotFind, slotList } from "./commands/read.js";
+import { courtGet, courtLanes, courtList, courtSports, slotFind, slotList } from "./commands/read.js";
 import { bookingCreate, payBanks, payPse, payStatus } from "./commands/write.js";
 import { COMMANDS, findCommand } from "./registry.js";
 
 const HANDLERS: Record<string, Handler> = {
   "court list": courtList,
   "court get": courtGet,
+  "court lanes": courtLanes,
+  "court sports": courtSports,
   "slot list": slotList,
   "slot find": slotFind,
   "auth login": authLogin,
@@ -22,13 +26,30 @@ const HANDLERS: Record<string, Handler> = {
   "pay banks": payBanks,
   "pay pse": payPse,
   "pay status": payStatus,
+  "pay pending": payPending,
+  "pay history": payHistory,
+  "gym status": gymStatus,
+  "gym quote": gymQuote,
+  "gym availability": gymAvailability,
+  "gym active": gymActive,
+  "gym buy": gymBuy,
+  "gym activate": gymActivate,
+  "activity list": activityList,
+  "activity get": activityGet,
+  "activity programs": activityPrograms,
+  "activity stages": activityStages,
+  "activity categories": activityCategories,
+  "activity mine": activityMine,
+  "activity subscribe": activitySubscribe,
+  "activity unsubscribe": activityUnsubscribe,
+  "profile list": profileList,
   doctor,
   killswitch,
   schema,
 };
 
 /** The single most common operation gets the shortest spelling. */
-const ALIASES: Record<string, string[]> = { find: ["slot", "find"] };
+const ALIASES: Record<string, string[]> = { find: ["slot", "find"], space: ["court"], activities: ["activity"] };
 
 export async function main(argv: string[]): Promise<number> {
   const args = parseArgs(argv);
