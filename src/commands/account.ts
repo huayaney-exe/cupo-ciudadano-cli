@@ -167,7 +167,8 @@ export async function schema() {
 
 export function helpText(): string {
   const lines = [bold("idrd") + dim(" — CLI no oficial del Portal Ciudadano IDRD (Bogotá)"), "", bold("Comandos:")];
-  for (const c of COMMANDS) lines.push(`  ${c.name.padEnd(21)} ${c.summary}${c.trust === "T3" ? warn("  [irreversible]") : ""}`);
+  const w = Math.max(...COMMANDS.map((c) => c.name.length)) + 1;
+  for (const c of COMMANDS) lines.push(`  ${c.name.padEnd(w)} ${c.summary}${c.trust === "T3" ? warn("  [irreversible]") : ""}`);
   lines.push("", bold("Globales:"), ...GLOBAL_FLAGS.map((f) => `  ${f.flag.padEnd(20)} ${f.description}`));
   lines.push("", dim("Detalle de un comando: idrd <comando> --help · Contrato para agentes: idrd schema"));
   return lines.join("\n");

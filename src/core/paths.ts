@@ -15,4 +15,9 @@ export const paths = {
   sessions: (profile?: string) => join(appHome(), "sessions", profileName(profile)),
   audit: () => join(appHome(), "audit"),
   bookings: (profile?: string) => join(appHome(), "bookings", profileName(profile)),
+  /** CEFE Chapinero (cefechapinero.com) is a different platform and account: its own store. */
+  cefe: {
+    config: () => join(appHome(), "cefe"),
+    sessions: (profile?: string) => join(appHome(), "cefe", "sessions", profileName(profile)),
+  },
 };

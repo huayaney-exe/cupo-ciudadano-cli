@@ -6,6 +6,7 @@ import { emitError, emitResult, isJson } from "./core/output.js";
 import { authLogin, authLogout, authStatus, bookingList, commandHelp, doctor, helpText, killswitch, payHistory, payPending, schema, VERSION } from "./commands/account.js";
 import { activityCategories, activityGet, activityList, activityMine, activityPrograms, activityStages, activitySubscribe, activityUnsubscribe, profileList } from "./commands/activities.js";
 import { gymActivate, gymActive, gymAvailability, gymBuy, gymQuote, gymStatus } from "./commands/gym.js";
+import * as cefe from "./commands/cefe.js";
 import type { Handler } from "./commands/context.js";
 import { courtGet, courtLanes, courtList, courtSports, slotFind, slotList } from "./commands/read.js";
 import { bookingCreate, payBanks, payPse, payStatus } from "./commands/write.js";
@@ -43,20 +44,45 @@ const HANDLERS: Record<string, Handler> = {
   "activity subscribe": activitySubscribe,
   "activity unsubscribe": activityUnsubscribe,
   "profile list": profileList,
+  "cefe auth login": cefe.cefeLogin,
+  "cefe auth status": cefe.cefeStatus,
+  "cefe auth logout": cefe.cefeLogout,
+  "cefe auth register": cefe.cefeRegister,
+  "cefe me": cefe.cefeMe,
+  "cefe pool list": cefe.cefePoolList,
+  "cefe pool get": cefe.cefePoolGet,
+  "cefe slot list": cefe.cefeSlotList,
+  "cefe slot find": cefe.cefeSlotFind,
+  "cefe booking create": cefe.cefeBookingCreate,
+  "cefe booking list": cefe.cefeBookingList,
+  "cefe booking cancel": cefe.cefeBookingCancel,
+  "cefe course list": cefe.cefeCourseList,
+  "cefe course get": cefe.cefeCourseGet,
+  "cefe course mine": cefe.cefeCourseMine,
+  "cefe course enroll": cefe.cefeCourseEnroll,
+  "cefe class book": cefe.cefeClassBook,
+  "cefe class cancel": cefe.cefeClassCancel,
+  "cefe tournament list": cefe.cefeTournamentList,
+  "cefe tournament get": cefe.cefeTournamentGet,
+  "cefe tournament mine": cefe.cefeTournamentMine,
+  "cefe tournament register": cefe.cefeTournamentRegister,
+  "cefe tournament unregister": cefe.cefeTournamentUnregister,
+  "cefe promo list": cefe.cefePromoList,
   doctor,
   killswitch,
   schema,
 };
 
 /** The single most common operation gets the shortest spelling. */
-const ALIASES: Record<string, string[]> = { find: ["slot", "find"], space: ["court"], activities: ["activity"] };
+const ALIASES: Record<string, string[]> = { find: ["slot", "find"], space: ["court"], activities: ["activity"], "cefe find": ["cefe", "slot", "find"], "cefe pools": ["cefe", "pool", "list"], "cefe courses": ["cefe", "course", "list"] };
 
 export async function main(argv: string[]): Promise<number> {
   const args = parseArgs(argv);
   const flags: GlobalFlags = parseGlobalFlags(args);
   let words = args._.slice();
-  const alias = words[0] ? ALIASES[words[0]] : undefined;
-  if (alias) words = [...alias, ...words.slice(1)];
+  const two = words.slice(0, 2).join(" ");
+  const alias = ALIASES[two] ? { to: ALIASES[two]!, n: 2 } : words[0] && ALIASES[words[0]] ? { to: ALIASES[words[0]]!, n: 1 } : undefined;
+  if (alias) words = [...alias.to, ...words.slice(alias.n)];
 
   if (args.version) {
     process.stdout.write(isJson(flags) ? `${JSON.stringify({ ok: true, version: VERSION })}\n` : `${VERSION}\n`);

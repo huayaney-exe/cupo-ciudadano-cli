@@ -113,6 +113,93 @@ export type Scenario = {
   adultBooking?: boolean;
 };
 
+// ---------------------------------------------------------------- CEFE Chapinero mock (cefechapinero.com backend)
+export const CEFE_POOLS = [
+  { poolId: "pool-sem", name: "Piscina Semiolímpica", description: "25 m", capacity: 30, pricePerHour: 0, isActive: true, schedules: [{ dayOfWeek: "Jueves", open: "06:00", close: "20:00" }] },
+  { poolId: "pool-occ", name: "Piscina Recreativa Occidental", description: "niños", capacity: 20, pricePerHour: 0, isActive: true, schedules: [] },
+  { poolId: "pool-ori", name: "Piscina Recreativa Oriental", description: "", capacity: 20, pricePerHour: 0, isActive: false, schedules: [] },
+];
+export const CEFE_SCHEDULE = {
+  default: { slots: [{ time: "06:00", capacity: 30 }, { time: "07:15", capacity: 30 }, { time: "08:15", capacity: 30 }], isClosed: false },
+  weekly: { MONDAY: { isClosed: true, slots: [] }, THURSDAY: { isClosed: false, slots: [{ time: "06:00", capacity: 30 }, { time: "07:15", capacity: 30 }, { time: "09:45", capacity: 10 }] } },
+  overrides: [{ date: "2026-11-07", isClosed: false, slots: [{ time: "10:00", capacity: 5 }] }],
+};
+export const CEFE_COURSES = [
+  { courseId: "a3d9fade-64c9-467e-b2d4-17653697ade7", name: "Curso Adultos Nivel 3", group: "Cursos de Natación", type: "course", description: "desc", duration: 60, numberOfClasses: 4, price: 85250, priceEstrato1_3: 80000, priceEstrato4_6: 85250, maxEnrollments: 10, maxEnrollmentsPerUser: 1, isFull: false, instructor: "No Aplica", poolId: "pool-sem", schedule: [{ day: "thursday", startTime: "06:00", endTime: "07:00" }], startDate: "2025-11-07", status: "ACTIVE" },
+  { courseId: "28409344-0000-0000-0000-000000000000", name: "Hidrobiofilia", group: "Actividades", type: "activity", description: "x", duration: 60, numberOfClasses: 1, price: 12800, priceEstrato1_3: 12800, priceEstrato4_6: 12800, maxEnrollments: 20, maxEnrollmentsPerUser: 1, isFull: true, instructor: "", poolId: "pool-sem", schedule: [], startDate: "2025-11-07", status: "ACTIVE" },
+];
+export const CEFE_USER = { userId: "u-1", email: "ana@cefe.co", role: "client", name: "Ana Ruiz", phone: "3000000000", estrato: "3", dateOfBirth: "1990-01-01", identification: "123", documentType: "CC", credits: 0, reservasDisponibles: 0, dependents: [{ name: "Leo Ruiz", documentType: "TI", identification: "456", dateOfBirth: "2017-05-05", relationship: "hijo" }] };
+
+export type CefeScenario = {
+  user?: Record<string, unknown>;
+  /** occupancy records returned by /pool-slots for 2026-11-05 */
+  occupancy?: Array<{ date: string; capacity: number; reservedCount: number; status: string }>;
+  reservations?: Record<string, unknown>[];
+  loginStatus?: number;
+  onCreate?: (body: unknown) => void;
+  enrollments?: Record<string, unknown>[];
+  classBookings?: Record<string, unknown>[];
+};
+
+export function mockCefe(sc: CefeScenario = {}) {
+  const calls: Call[] = [];
+  const user = { ...CEFE_USER, ...(sc.user ?? {}) };
+  setFetch(async (input, init) => {
+    const url = new URL(String(input));
+    const method = init?.method ?? "GET";
+    const body = init?.body ? JSON.parse(String(init.body)) : undefined;
+    const headers = (init?.headers ?? {}) as Record<string, string>;
+    calls.push({ method, url: url.pathname + url.search, body, auth: headers.Authorization ?? null });
+    const json = (status: number, b: unknown) => new Response(JSON.stringify(b), { status, headers: { "content-type": "application/json" } });
+    const p = url.pathname.replace(/^\/main/, "");
+    const authed = headers.Authorization === "Bearer cefe-tok";
+    const needAuth = () => json(401, { message: "Debes iniciar sesión para continuar." });
+    if (p === "/auth/login" && method === "POST") {
+      if (sc.loginStatus && sc.loginStatus !== 200) return json(sc.loginStatus, { message: "Credenciales incorrectas" });
+      if ((body as { email: string }).email !== "ana@cefe.co") return json(401, { message: "Credenciales incorrectas" });
+      return json(200, { token: "cefe-tok", user });
+    }
+    if (p === "/auth/register" && method === "POST") return json(201, { token: "cefe-tok", user: { ...user, ...(body as object) } });
+    if (p === "/pools") return json(200, CEFE_POOLS);
+    if (/^\/pools\/[^/]+$/.test(p)) { const pool = CEFE_POOLS.find((x) => x.poolId === p.split("/")[2]); return pool ? json(200, pool) : json(404, { message: "no" }); }
+    if (p.startsWith("/schedules/")) return json(200, CEFE_SCHEDULE);
+    if (p === "/pool-slots") {
+      if (!url.searchParams.get("date")) return json(500, { message: "Internal server error" });
+      const date = url.searchParams.get("date");
+      const occ = date === "2026-11-05" ? (sc.occupancy ?? [{ date: "2026-11-05T06:00:00", capacity: 30, reservedCount: 30, status: "OPEN" }, { date: "2026-11-05T07:15:00", capacity: 30, reservedCount: 12, status: "OPEN" }]) : [];
+      return json(200, { slots: occ.map((o) => ({ ...o, poolId: url.searchParams.get("poolId"), __typename: "PoolSlots-main" })), count: occ.length });
+    }
+    if (p === "/courses") return json(200, CEFE_COURSES);
+    if (/^\/courses\/[^/]+\/availability$/.test(p)) {
+      const from = url.searchParams.get("startDate")!;
+      return json(200, { courseId: p.split("/")[2], courseName: "Curso Adultos Nivel 3", maxEnrollments: 10, dates: [{ date: from, classes: from === "2026-11-05" ? [{ classDateTime: "2026-11-05T06:00:00", maxCapacity: 10, currentBookings: 3, availableSlots: 7, isAvailable: true }] : [] }] });
+    }
+    if (p === "/promotions") return json(200, [{ promotionId: "6ac48f53-x", name: "AquaGym", promotionType: "USAGE_PASS", status: "ACTIVE", visibility: "RESTRICTED", price: 50000, endDate: "2026-07-15T00:00:00.000Z", description: "Un mes" }]);
+    if (p.startsWith("/ratings/pool/")) return json(200, { data: { overallAverage: 4.8, totalRatings: 110, npsScore: 66 } });
+    // ---- authenticated
+    if (!authed) return needAuth();
+    if (p === "/users/u-1" && method === "GET") return json(200, user);
+    if (p === "/users/u-1" && method === "PUT") return json(200, { ...user, ...(body as object) });
+    if (p === "/users/u-1/reservas") return json(200, { reservations: (sc.reservations ?? []).filter((r) => !url.searchParams.get("date") || String(r.startTime).startsWith(url.searchParams.get("date")!)) });
+    if (p === "/reservations" && method === "GET") return json(200, sc.reservations ?? []);
+    if (p === "/reservations" && method === "POST") { sc.onCreate?.(body); return json(201, { ...(body as object), userId_uuid: "res-9", reservationId: "res-9" }); }
+    if (p.startsWith("/reservations/") && method === "DELETE") return json(200, {});
+    if (p === "/users/u-1/courses") return json(200, sc.enrollments ?? []);
+    if (p === "/users/u-1/class-bookings" && method === "GET") return json(200, sc.classBookings ?? []);
+    if (p === "/users/u-1/class-bookings" && method === "POST") return json(200, { success: true, booking: body });
+    if (p === "/users/u-1/class-bookings" && method === "DELETE") return json(200, { success: true });
+    if (/^\/courses\/[^/]+\/users\/u-1\/enroll$/.test(p) && method === "POST") return json(201, { enrolled: true, ...(body as object) });
+    if (p === "/tournaments") return json(200, { data: [{ tournamentId: "t-1", name: "Festival", status: "registration_open", registrationCloseAt: "2026-12-01T00:00:00Z" }] });
+    if (p === "/tournaments/t-1") return json(200, { data: { tournamentId: "t-1", name: "Festival", status: "registration_open" } });
+    if (p === "/tournaments/t-1/competitions") return json(200, { data: [{ competitionId: "c-1", name: "50 m libre", category: "adultos" }] });
+    if (p === "/tournaments/t-1/competitions/c-1/register") return json(200, { data: { registered: method === "POST" } });
+    if (p === "/tournaments/my-registrations") return json(200, { data: [] });
+    if (p === "/users/u-1/promotions") return json(200, []);
+    return json(404, { message: "Not found" });
+  });
+  return calls;
+}
+
 export function mockPortal(sc: Scenario = {}) {
   const calls: Call[] = [];
   setFetch(async (input, init) => {

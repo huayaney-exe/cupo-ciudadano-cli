@@ -104,6 +104,20 @@ refuses instead.
   with `per_page` plus a `last_page` loop and two contract tests (a mock that
   caps pages, one that honours `per_page`).
 
+- **Wrong host path read as a WAF.** The CEFE backend sits under an API
+  Gateway stage (`…/main`); `new URL("/pools", base)` silently dropped it and
+  every call got 403 "Forbidden", indistinguishable from a bot check. A
+  header bisection was the wrong instinct (and was blocked); reading the URL
+  the client actually built was the right one. Fixed in `request()`.
+
+## Third pass: a second target in the same binary (2026-11-04)
+
+The owner's CEFE Chapinero is not an IDRD facility; it runs its own platform.
+Recon (`docs/recon-cefe.md`) came from the Next.js bundle's service classes
+plus seven anonymous replays. Added as `idrd cefe …` (24 commands): pools and
+per-slot places, bookings (T2, cancellable), courses and classes, tournaments,
+promotions, profile. Writes mirror the SPA's payloads and are unexercised live.
+
 ## What the human-output pass caught that 63 green tests did not
 
 - Per-hour lists ("4:00 PM, 5:00 PM, 6:00 PM…") truncated at column width →
@@ -135,7 +149,7 @@ derived from frontend code.
 - Code: `src` (CLI), `src/cli` (cligentic blocks)
 - Contract: `idrd schema`; shapes in `src/registry.ts`
 - Agent manual: `skills/idrd/SKILL.md` (frontmatter validated)
-- Tests: 82 pass, 0 fail across 7 files (unit, contract with mock portal, agent-first subprocess rules incl. real-TTY checks) — `bun run check`
+- Tests: 95 pass, 0 fail across 8 files (unit, contract with mock portal, agent-first subprocess rules incl. real-TTY checks) — `bun run check`
 - Linked globally (`npm link`) and run by name against the live portal for all
   nine space kinds, pool lanes, coliseum sports, activities, PSE banks, and a
   404 path

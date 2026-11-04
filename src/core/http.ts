@@ -8,6 +8,8 @@ export const HOSTS = {
   pay: process.env.IDRD_PAY_URL || "https://portalcontratista-back.idrd.gov.co",
   /** The portal's public web frontend (source of its OAuth web-client config). */
   web: process.env.IDRD_WEB_URL || "https://portalciudadano.idrd.gov.co",
+  /** CEFE Chapinero's own backend (cefechapinero.com → AWS API Gateway). */
+  cefe: process.env.CEFE_API_URL || "https://49jdz51sl6.execute-api.us-east-1.amazonaws.com/main",
 };
 
 const UA = "idrd-cli/0.1 (+personal, unofficial)";
@@ -33,7 +35,8 @@ export function setFetch(f: FetchLike): void {
 
 export async function request<T = unknown>(base: string, path: string, opts: RequestOptions = {}): Promise<HttpResponse<T>> {
   const method = opts.method ?? "GET";
-  const url = new URL(path, base);
+  // Keep the base's own path (API Gateway stages like `/main`): `new URL("/x", base)` would drop it.
+  const url = path.startsWith("/") ? new URL(`${base.replace(/\/$/, "")}${path}`) : new URL(path, base);
   for (const [k, v] of Object.entries(opts.query ?? {})) if (v !== undefined) url.searchParams.set(k, String(v));
   const headers: Record<string, string> = { Accept: "application/json", "User-Agent": UA };
   if (opts.body !== undefined) headers["Content-Type"] = "application/json";

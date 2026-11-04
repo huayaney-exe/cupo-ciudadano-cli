@@ -177,6 +177,27 @@ Los nombres de día apuntan a la **próxima** ocurrencia, contando hoy. Todas la
 
 Cobertura del portal (3 nov 2026, en vivo): 320 canchas, 12 piscinas, 35 asadores, 5 gimnasios, 4 coliseos; 74 actividades en 45 sedes y 29 programas.
 
+## CEFE Chapinero
+
+El Centro Felicidad Chapinero no está en el portal del IDRD: tiene su propia plataforma ([cefechapinero.com](https://cefechapinero.com)) y su propia cuenta. El mismo `idrd` la cubre bajo `idrd cefe …`:
+
+```bash
+idrd cefe pool list                                   # piscinas, capacidad y horario
+idrd cefe find --date sab --from 06:00 --to 10:00     # cupos libres en todas las piscinas
+idrd cefe slot list semiolimpica --date mañana --free # cupos por franja (60 min) de una piscina
+idrd cefe course list --available                     # cursos y actividades con precio por estrato
+idrd cefe course get 74536a5b                         # detalle y clases con cupo
+
+idrd cefe auth login --email tu@correo.com            # CEFE_PASSWORD o --password-stdin para agentes
+idrd cefe me                                          # perfil, créditos, dependientes, qué falta para reservar
+idrd cefe booking create semiolimpica --date sab --time 07:15 --dependent 1   # vista previa; --yes reserva
+idrd cefe booking list --upcoming · idrd cefe booking cancel <id> --yes       # cancelable hasta 6 h antes
+idrd cefe course enroll <curso> --yes · idrd cefe class book <curso> --date jue --yes
+idrd cefe tournament list · idrd cefe tournament register <t> --competition <c> --yes
+```
+
+Pago: `--pay efectivo` (en la sede, default), `--pay wompi` (la reserva queda pendiente y el pago se completa en la web) o `--pay creditos`. Desde el 5 de noviembre de 2026 la práctica libre cuesta 10.000 COP por persona y hora; antes es gratis. Una reserva por día por cuenta. Las inscripciones a cursos y clases están deshabilitadas en la web desde julio de 2026; el CLI lo muestra como check en rojo.
+
 ## Cómo te protege al reservar
 
 1. **Vista previa por defecto.** Sin `--yes`, `booking create` solo muestra lo que haría.
@@ -248,7 +269,9 @@ Tu contraseña **nunca** se guarda en disco. El CLI no envía datos a ningún se
 | Mensualidad de gimnasio (estado, cotización, compra, activación) | 🟡 Igual: desde el código del portal, sin ejecutar en vivo |
 | Inscripción y retiro de actividades, perfiles, pagos pendientes e historial | 🟡 Igual: desde el código del portal, sin ejecutar en vivo |
 | Tope de 4 horas por semana | ℹ️ Lo valida el portal, no el CLI |
-| Pago por Daviplata, calendario de recreación, programas sociales | ❌ Fuera de alcance |
+| CEFE Chapinero: piscinas, cupos, cursos, clases disponibles, promociones | ✅ Verificado contra cefechapinero.com |
+| CEFE Chapinero: sesión, reservas, inscripciones, clases, torneos | 🟡 Desde el código de la web, sin ejecutar en vivo |
+| Pago por Daviplata, calendario de recreación, programas sociales, pago Wompi desde el CLI | ❌ Fuera de alcance |
 
 Si haces la primera reserva real, tu respuesta queda guardada en `~/.idrd/bookings/`. Si algo no coincide con lo esperado, el error muestra el mensaje del portal.
 

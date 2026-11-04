@@ -1,6 +1,6 @@
 ---
 name: idrd
-description: "Operate the unofficial `idrd` CLI for Bogotá's IDRD Portal Ciudadano, covering every service the portal offers: find free slots in public courts (tennis, pádel, pickleball, soccer), pools (per lane, with places), grills (whole-day blocks), CEFE gyms (hourly places or monthly membership) and coliseums (per sport); book behind an explicit confirmation gate and get the PSE payment link; browse sport schools and programs (Escuelas de mi Barrio, Deporte de 0 a 100, CEFE activities) and enrol a profile; read pending payments and history. Use when the user mentions IDRD, a Bogotá public park, a CEFE, a court, pool, grill, gym or sports school."
+description: "Operate the unofficial `idrd` CLI for Bogotá's IDRD Portal Ciudadano, covering every service the portal offers: find free slots in public courts (tennis, pádel, pickleball, soccer), pools (per lane, with places), grills (whole-day blocks), CEFE gyms (hourly places or monthly membership) and coliseums (per sport); book behind an explicit confirmation gate and get the PSE payment link; browse sport schools and programs (Escuelas de mi Barrio, Deporte de 0 a 100, CEFE activities) and enrol a profile; read pending payments and history. Also operates the separate CEFE Chapinero platform (cefechapinero.com) under `idrd cefe …`: pool places per 60-minute slot, free-practice bookings (cancellable), swimming courses and classes, tournaments, promotions. Use when the user mentions IDRD, a Bogotá public park, a CEFE, CEFE Chapinero, a court, pool, grill, gym or sports school."
 ---
 
 # idrd
@@ -101,6 +101,25 @@ idrd activity subscribe <activityId> --person <profileId> --json          # prev
 idrd activity subscribe <activityId> --person <profileId> --yes --confirm activity<a>@profile<p> --json
 ```
 Show the human the consents listed in the preview before confirming. Enrolments can be undone with `activity unsubscribe`.
+
+## CEFE Chapinero (`idrd cefe …`)
+
+Different platform and account (cefechapinero.com). Password from `CEFE_PASSWORD`, `--password-stdin` or the TTY prompt; session in `~/.idrd/cefe/`. No refresh: `auth/expired` → ask the human to run `idrd cefe auth login`.
+
+| Command | What it returns |
+|---|---|
+| `idrd cefe pool list [--all]` · `cefe pool get <pool>` | pools (`poolId`, capacity, hours); detail with slot config and public rating. `<pool>` is a poolId or a name fragment (`semiolimpica`) |
+| `idrd cefe slot list <pool> --date <d> [--free]` | `slots[] = {time, start, end, capacity, reserved, free, available}`, `priceEstimate` |
+| `idrd cefe find --date <d> [--from HH:MM --to HH:MM]` | free slots across active pools |
+| `idrd cefe auth login --email <e>` · `auth status` · `auth logout` · `cefe me` | session; `me` lists dependents (1-based for `--dependent`) and `missingForBooking` |
+| `idrd cefe booking create <pool> --date <d> --time HH:MM [--dependent 1,2] [--pay efectivo\|wompi\|creditos] [--notes X]` | **preview** `{ready, checks[], price, pay, request}`; `--yes` → **live** `{reservation{id, status}, payUrl?}` |
+| `idrd cefe booking list [--upcoming] [--date\|--from --to] [--status]` · `cefe booking cancel <id> --yes` | reservations with `cancellable`; cancel allowed > 6 h before start |
+| `idrd cefe course list [--text X] [--available]` · `cefe course get <course> [--from --to]` · `cefe course mine` | courses with stratum prices; classes with places; enrolments + booked classes |
+| `idrd cefe course enroll <course> [--pay efectivo\|wompi]` · `cefe class book <course> --date <d>` · `cefe class cancel <course> --date <d> --yes` | preview first; `--yes` executes. The web has these disabled since 2026-07-30: the `portal` check is red and live refuses |
+| `idrd cefe tournament list\|get <id>\|mine` · `cefe tournament register <id> --competition <c> [--dependent doc] [--sex M\|F] --yes` · `… unregister … --yes` | tournaments and competitions (auth) |
+| `idrd cefe promo list` · `idrd cefe auth register … --accept-habeas-data` | promotions (purchase on the website); account creation (consent flag required) |
+
+Rules the CLI checks before a booking: slot published that day, places ≥ people, one reservation per day, profile has phone, stratum and birth date. Price: free before 2026-11-05, then 10,000 COP per person per hour. Payment stays with the human: `efectivo` at the venue, `wompi` on cefechapinero.com. Everything behind login is implemented from the site's own code and unverified live; read the error's message if the server disagrees.
 
 ## Limits
 

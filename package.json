@@ -1,6 +1,6 @@
 {
   "name": "idrd-cli",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Unofficial agent-first CLI for Bogotá's IDRD Portal Ciudadano (park courts: availability, booking, PSE payment link).",
   "type": "module",
   "private": true,

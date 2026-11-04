@@ -100,12 +100,28 @@ The portal's booking screen decides its form from `details.details.endowment`: `
 
 Activities are a different object (`/api/citizen-portal/public-schedules`): programs × stages × schedules with quotas, ages, price and consents. The portal filters by `program_id[]`/`stage_id[]`; everything else is filtered client-side after reading every page. Enrolment is `POST /api/profiles/{profileId}/schedules/{activityId}` with `{profile_id, terms, consent[]}`; removal is `DELETE /api/profiles/subscriptions/{id}`. `--person` (not `--profile`, which is the global account flag) names the profile.
 
+## CEFE Chapinero namespace (added 2026-11-04)
+
+A second, unrelated target in the same binary: cefechapinero.com (Next.js SPA over AWS API Gateway, "Infracol"). Contract in `docs/recon-cefe.md`. It lives under `idrd cefe <noun> <verb>` (the command table supports three words) with its own session store (`~/.idrd/cefe/`), `CEFE_PASSWORD`/`CEFE_EMAIL`, and a Bearer token the SPA keeps in localStorage. Availability follows the booking screen: slot list from `/schedules/{poolId}` (override > weekly > default), occupancy from `/pool-slots`, today's past times hidden. Reservations are reversible up to 6 h before start, so `cefe booking create` is **T2** (preview by default, `--yes` to execute) rather than T3; cancel, enrol, class book, tournament register are T2 with `--yes`. Payment never leaves the human: EFECTIVO is paid at the venue, WOMPI on the website, CREDITOS/FREE confirm directly. Account registration demands `--accept-habeas-data`, a consent flag an agent must be told to pass.
+
+| Command group | Trust | Auth | Notes |
+|---|---|---|---|
+| `cefe auth login/status/logout/register` · `cefe me` | T1/T0/T1/T2 · T0 | — / yes | no refresh endpoint: expiry → login again |
+| `cefe pool list/get` · `cefe slot list/find` (`cefe find`) | T0 | no | public; price estimate from the SPA's constants |
+| `cefe booking create` | **T2** | yes | one per day, profile complete, slot published and with places; cancellable 6 h before |
+| `cefe booking list/cancel` | T0 / T2 | yes | |
+| `cefe course list/get` · `cefe course mine` | T0 | no / yes | stratum-based prices |
+| `cefe course enroll` · `cefe class book/cancel` | T2 | yes | mirror the web's "disabled since 2026-07-30" gate as a check |
+| `cefe tournament list/get/mine/register/unregister` · `cefe promo list` | T0 / T2 | yes / no | purchases of promotions stay on the website |
+
 ## Verified vs unverified
 
 
 **Verified live (anonymous), 2026-11-03:** web-client discovery from the portal frontend; lists for all 9 kinds read in full through the Laravel paginator (`per_page`/`meta.last_page`): 320 courts (167 reservable), 12 pools (10), 35 grills (31), 5 gyms, 4 coliseums; pool lanes and per-lane calendars with quotas (37 lanes scanned in one `find`); grill blocks; coliseum sports and calendars with `sport_id`; gym hourly quotas; activities (74, 2 pages), programs, stages, categories, activity detail; park and endowment details; the reservable-minus-reserved computation; PSE banks; error mapping (404 → exit 4). Gym membership, profiles, subscriptions and payments endpoints answer 401 anonymously, as expected.
 
 **Verified live with the owner's account (2026-11-03, pure HTTP, before this build):** password grant (8 h + refresh token), `/api/user`, `/api/citizen-portal/bookings`.
+
+**CEFE Chapinero, verified live (anonymous), 2026-11-04:** pools, pool detail, schedule config, pool-slots occupancy, courses, course availability, promotions, public rating summary; three-word dispatch and aliases; 403 mapping. **CEFE, not exercised live:** everything behind login (login response, reservations list/create/cancel, user profile, enrolments, class bookings, tournaments), all read from the SPA's service classes and covered by `tests/contract/cefe.test.ts` against a mock.
 
 **Implemented from the bundle, not exercised live** (no credentials available during the autonomous build, and the owner chose not to create a real booking):
 - `POST /api/parks/schedules/{id}/payment` response shape (fields taken from the component that consumes it).
