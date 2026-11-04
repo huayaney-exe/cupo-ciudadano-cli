@@ -34,9 +34,9 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/huayaney-exe/cupo.git"
+    "url": "git+https://github.com/huayaney-exe/cupo-ciudadano-cli.git"
   },
-  "homepage": "https://github.com/huayaney-exe/cupo#readme",
+  "homepage": "https://github.com/huayaney-exe/cupo-ciudadano-cli#readme",
   "keywords": [
     "cupo",
     "bogota",

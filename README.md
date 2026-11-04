@@ -59,8 +59,8 @@ Todo lo específico de cada sistema sigue disponible bajo su prefijo: `cupo idrd
 - No necesitas Bun ni compilar: el repo trae el ejecutable listo en `dist/`.
 
 ```bash
-git clone https://github.com/huayaney-exe/cupo.git
-cd cupo
+git clone https://github.com/huayaney-exe/cupo-ciudadano-cli.git
+cd cupo-ciudadano-cli
 npm link
 cupo doctor
 ```
@@ -129,7 +129,7 @@ Empieza por `cupo schema`: trae `start` (los tres comandos del job), `providers`
 - `nextSteps` siempre son comandos reales y ejecutables; en `cupo find`, cada resultado trae su `bookCommand`.
 - Códigos de salida: `0` ok · `2` uso o regla · `3` falta sesión · `4` no existe · `5` rechazado (falta confirmación, killswitch, sin cupo) · `6` proveedor o red.
 - Nunca se queda esperando: si falta algo, falla con un error estructurado. Contraseñas sin terminal: `IDRD_PASSWORD`, `CEFE_PASSWORD` o `--password-stdin`.
-- Manual para agentes: [`skills/cupo/SKILL.md`](skills/cupo/SKILL.md). Instálalo con `npx skills add huayaney-exe/cupo`.
+- Manual para agentes: [`skills/cupo/SKILL.md`](skills/cupo/SKILL.md). Instálalo con `npx skills add huayaney-exe/cupo-ciudadano-cli`.
 
 ## Solución de problemas
 

@@ -5,7 +5,7 @@ description: "Operate `cupo`, the unofficial CLI that finds and books places to 
 
 # cupo
 
-Agent manual for the `cupo` CLI (formerly `idrd`; that name still works as an alias). Install (Node >= 20, no Bun needed): `git clone https://github.com/huayaney-exe/cupo.git && cd cupo && npm link`, then `cupo doctor`.
+Agent manual for the `cupo` CLI (formerly `idrd`; that name still works as an alias). Install (Node >= 20, no Bun needed): `git clone https://github.com/huayaney-exe/cupo-ciudadano-cli.git && cd cupo-ciudadano-cli && npm link`, then `cupo doctor`.
 
 ## The job in three commands
 
