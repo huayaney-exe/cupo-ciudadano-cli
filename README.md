@@ -136,13 +136,19 @@ Empieza por `cupo schema`: trae `start` (los tres comandos del job), `providers`
 **`zsh: parse error near ')'` al pegar comandos.**
 Pegaste líneas que tenían comentarios (`# …`). Por defecto zsh no acepta comentarios en la terminal interactiva. Los bloques de este README no tienen comentarios. Si quieres que zsh los acepte, ejecuta `setopt interactivecomments`, o agrégalo a tu `~/.zshrc`.
 
-**`idrd: command not found` después de `npm link`.**
+**`cupo: command not found` después de `npm link`.**
 La carpeta de ejecutables globales de npm no está en tu `PATH`. Revisa cuál es con `npm prefix -g`; los ejecutables quedan en `<esa ruta>/bin`, y esa carpeta tiene que estar en tu `PATH`.
+
+**`npm link` falla con `EEXIST: file already exists … /bin/idrd`.**
+Tenías instalada la versión anterior, que se llamaba `idrd`. Reemplázala: `npm link --force`. Tus sesiones y reservas en `~/.idrd` se siguen usando tal cual.
+
+**`auth/invalid-credentials` en `cupo cefe auth login`.**
+El correo o la contraseña no coinciden con tu cuenta del CEFE Chapinero, que es distinta a la del IDRD. Pruébalos en [cefechapinero.com/login](https://cefechapinero.com/login).
 
 **`node: command not found` o una versión menor a 20.**
 Instala Node 20 o superior desde [nodejs.org](https://nodejs.org), o con `brew install node`.
 
-**`auth/invalid-credentials`.**
+**`auth/invalid-credentials` en `cupo idrd auth login`.**
 El correo o la contraseña no coinciden con tu cuenta del portal. Pruébalos directamente en [portalciudadano.idrd.gov.co](https://portalciudadano.idrd.gov.co).
 
 **`auth/web-client` o `upstream/web-client`.**
