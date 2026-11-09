@@ -2132,6 +2132,9 @@ function requireSession(profile) {
 // src/idrd/time.ts
 var TZ = "America/Bogota";
 var nowImpl = () => new Date;
+function nowMs() {
+  return nowImpl().getTime();
+}
 function bogotaNow() {
   const parts = Object.fromEntries(new Intl.DateTimeFormat("en-CA", {
     timeZone: TZ,
@@ -2402,13 +2405,13 @@ function priceEstimate(date, people) {
   return date < PAID_FROM ? 0 : PRICE_PER_PERSON * Math.max(1, people);
 }
 var CANCEL_MARGIN_MS = 6 * 3600000;
-function canCancel(r, nowMs = Date.now()) {
+function canCancel(r, at = nowMs()) {
   if (!(r.status === "confirmed" || r.status === "pending"))
     return { ok: false, reason: `estado ${r.status || "desconocido"}` };
   const start = Date.parse(`${r.startTime}-05:00`);
   if (!Number.isFinite(start))
     return { ok: false, reason: "hora de inicio ilegible" };
-  if (start - nowMs <= CANCEL_MARGIN_MS)
+  if (start - at <= CANCEL_MARGIN_MS)
     return { ok: false, reason: "faltan menos de 6 h para la hora reservada" };
   return { ok: true };
 }
@@ -2937,7 +2940,7 @@ async function cefeClassCancel(ctx) {
   const booking = mine.find((b) => String(b.classDateTime ?? "").startsWith(date));
   if (!booking)
     fail("not-found/booking", `No tienes clase de ${c.name} el ${date}.`, "Mira `cupo cefe course mine`.");
-  if (Date.parse(`${String(booking.classDateTime)}-05:00`) <= Date.now())
+  if (Date.parse(`${String(booking.classDateTime)}-05:00`) <= nowMs())
     fail("rule/violation", "La clase ya pasó.");
   assertWritable();
   await approveGate({ cliName: "cupo", flags: { json: ctx.flags.json, noInput: ctx.flags.noInput } }, { title: "Cancelar clase", summary: `${c.name} · ${String(booking.classDateTime)}` }, { trust: "T2", yes: ctx.args.yes === true });
@@ -3485,8 +3488,8 @@ function checkBookingRules(input) {
     });
   }
   const startMs = Date.parse(`${input.date}T${String(input.startHour).padStart(2, "0")}:00:00-05:00`);
-  const nowMs = Date.parse(`${now.date}T${String(now.hour).padStart(2, "0")}:${String(now.minute).padStart(2, "0")}:00-05:00`);
-  const advance = (startMs - nowMs) / 3600000;
+  const nowMs2 = Date.parse(`${now.date}T${String(now.hour).padStart(2, "0")}:${String(now.minute).padStart(2, "0")}:00-05:00`);
+  const advance = (startMs - nowMs2) / 3600000;
   if (advance < 0) {
     v.push({ rule: "in-the-past", message: `${input.date} ${hourLabel(input.startHour)} ya pasó.` });
   } else if (court && advance < RULES.minAdvanceHours) {
@@ -3927,9 +3930,9 @@ var package_default = {
   },
   repository: {
     type: "git",
-    url: "git+https://github.com/huayaney-exe/cupo.git"
+    url: "git+https://github.com/huayaney-exe/cupo-ciudadano-cli.git"
   },
-  homepage: "https://github.com/huayaney-exe/cupo#readme",
+  homepage: "https://github.com/huayaney-exe/cupo-ciudadano-cli#readme",
   keywords: [
     "cupo",
     "bogota",

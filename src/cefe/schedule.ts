@@ -1,3 +1,4 @@
+import { nowMs } from "../idrd/time.js";
 import type { PoolSlotRecord, Reservation, ScheduleConfig } from "./api.js";
 
 /**
@@ -55,11 +56,11 @@ export function priceEstimate(date: string, people: number): number {
 /** Cancellation window used by the SPA: pending/confirmed and more than 6 h before start. */
 export const CANCEL_MARGIN_MS = 6 * 3600_000;
 
-export function canCancel(r: Reservation, nowMs = Date.now()): { ok: boolean; reason?: string } {
+export function canCancel(r: Reservation, at = nowMs()): { ok: boolean; reason?: string } {
   if (!(r.status === "confirmed" || r.status === "pending")) return { ok: false, reason: `estado ${r.status || "desconocido"}` };
   const start = Date.parse(`${r.startTime}-05:00`);
   if (!Number.isFinite(start)) return { ok: false, reason: "hora de inicio ilegible" };
-  if (start - nowMs <= CANCEL_MARGIN_MS) return { ok: false, reason: "faltan menos de 6 h para la hora reservada" };
+  if (start - at <= CANCEL_MARGIN_MS) return { ok: false, reason: "faltan menos de 6 h para la hora reservada" };
   return { ok: true };
 }
 

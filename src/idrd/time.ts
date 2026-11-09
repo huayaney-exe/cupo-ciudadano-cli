@@ -11,6 +11,11 @@ export function setNow(f: () => Date): void {
   nowImpl = f;
 }
 
+/** Current instant in ms, through the same seam as `bogotaNow()`. */
+export function nowMs(): number {
+  return nowImpl().getTime();
+}
+
 export function bogotaNow(): LocalNow {
   const parts = Object.fromEntries(
     new Intl.DateTimeFormat("en-CA", {

@@ -9,7 +9,7 @@ import { table } from "../core/table.js";
 import * as api from "../cefe/api.js";
 import { currentSession, login, logoutLocal, persistSession, requireSession, resolvePassword, storedEmail } from "../cefe/auth.js";
 import { canCancel, daySlots, priceEstimate, SLOT_MINUTES, spaGateClosed, type DaySlot } from "../cefe/schedule.js";
-import { addDays, bogotaNow, parseDate } from "../idrd/time.js";
+import { addDays, bogotaNow, nowMs, parseDate } from "../idrd/time.js";
 import type { Ctx } from "./context.js";
 
 const WEB = "https://cefechapinero.com";
@@ -496,7 +496,7 @@ export async function cefeClassCancel(ctx: Ctx) {
   const mine = await api.classBookings(s.token, s.user.userId, { courseId: c.courseId });
   const booking = mine.find((b) => String(b.classDateTime ?? "").startsWith(date));
   if (!booking) fail("not-found/booking", `No tienes clase de ${c.name} el ${date}.`, "Mira `cupo cefe course mine`.");
-  if (Date.parse(`${String(booking.classDateTime)}-05:00`) <= Date.now()) fail("rule/violation", "La clase ya pasó.");
+  if (Date.parse(`${String(booking.classDateTime)}-05:00`) <= nowMs()) fail("rule/violation", "La clase ya pasó.");
   assertWritable();
   await approveGate({ cliName: "cupo", flags: { json: ctx.flags.json, noInput: ctx.flags.noInput } }, { title: "Cancelar clase", summary: `${c.name} · ${String(booking.classDateTime)}` }, { trust: "T2", yes: ctx.args.yes === true });
   const a = audit(ctx, "cefe.class.cancel", "cefe class cancel", "T2", { courseId: c.courseId, at: booking.classDateTime });
