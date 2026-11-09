@@ -20,7 +20,7 @@ The job is "consígueme cupo para hacer deporte", not "operate the IDRD portal",
 
 ## Phase 2: command surface
 
-Noun-verb, English verbs agents already know (`list`, `get`, `create`), Spanish human output. Shorthand for the 90% operation: `cupo idrd find` = `cupo cupo idrd slot find`.
+Noun-verb, English verbs agents already know (`list`, `get`, `create`), Spanish human output. Shorthand for the 90% operation: `cupo idrd find` = `cupo idrd slot find`.
 
 | Command | Trust | Auth | Notes |
 |---|---|---|---|
