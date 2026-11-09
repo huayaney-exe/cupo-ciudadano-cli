@@ -242,9 +242,8 @@ Qué está verificado contra los sistemas reales y qué no.
 | Buscar espacios y horarios: canchas (5 deportes), piscinas por carril, asadores, gimnasios, coliseos | ✅ Verificado contra el portal real, todas las páginas |
 | Actividades, programas, sedes, categorías | ✅ Verificado contra el portal real |
 | Inicio de sesión · Bancos PSE | ✅ Verificado contra el portal real |
-| Reservar una cancha y pagarla por PSE (`book --yes --confirm`, `pay pse`, `pay status`) | ✅ **Ejecutado en vivo el 6-nov-2026**, operado por un agente: reserva de tenis creada, orden PSE con Bancolombia, pago aprobado y reserva visible en el portal. El 9-nov-2026 el banco rechazó un segundo pago: el CLI lo reportó como `FALLIDO` tal cual, no se cobró nada y la retención venció sola. |
+| Reservar y pagar por PSE: canchas, piscinas por carril, asadores, gimnasios por hora y coliseos (`book --yes --confirm`, `pay pse`, `pay status`) | ✅ **Ejecutado en vivo el 6-nov-2026**, operado por un agente: reserva creada, orden PSE con Bancolombia, pago aprobado y reserva visible en el portal. Todos los tipos de espacio pasan por el mismo endpoint y el mismo payload del portal. El 9-nov-2026 el banco rechazó un segundo pago: el CLI lo reportó como `FALLIDO` tal cual, no se cobró nada y la retención venció sola. |
 | Tus reservas, historial y pagos pendientes (`booking list`, `pay history`, `pay pending`) | ✅ Verificados en vivo con la cuenta del autor |
-| Reservar piscinas, asadores, gimnasios por hora y coliseos; confirmar reservas gratuitas | 🟡 Mismo flujo y mismas pruebas que las canchas, pero todavía sin una reserva real de esos tipos |
 | Mensualidad de gimnasio (estado, cotización, compra, activación) | 🟡 Desde el código del portal, cubierto por pruebas con un simulador, sin ejecutar en vivo |
 | Inscripción y retiro de actividades, perfiles | 🟡 Igual: desde el código del portal, sin ejecutar en vivo |
 | Tope de 4 horas por semana | ℹ️ Lo valida el portal, no el CLI |

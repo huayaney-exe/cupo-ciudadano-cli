@@ -140,7 +140,6 @@ A second, unrelated target in the same binary: cefechapinero.com (Next.js SPA ov
 **Implemented from the bundle, still not exercised live:**
 - `transferBankFree` (free confirmation) response.
 - The refresh grant (standard Passport; the SPA never uses it).
-- Booking for non-tennis scenarios (synthetic fields may route through the legacy SIM system).
 - The 4 h/week cap across the whole park system is not checked client-side (needs the shape of a non-empty `bookings` response).
 - Gym membership: `status`/`quote`/`availability` response fields (`active`, `ends_at`, `amount`, `valid_from`, `valid_to`, `park_id`, `service_id`, `concept`, `availability[]`) and the purchase flow (`{init:true}` → `membership_id`; PSE payload with `membership_id` and no `reservationId`; `{payment_code}` to activate), all read from the SPA.
 - Activities: `/api/profiles/list` and `/api/profiles/subscriptions` shapes, the subscribe body, and the DELETE.
