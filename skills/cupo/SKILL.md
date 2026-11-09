@@ -134,6 +134,7 @@ Rules the CLI checks before a booking: slot published that day, places ≥ peopl
 ## Limits
 
 - The portal publishes one week at a time; future weeks open Mondays at 9:00 a.m.
-- Not exercised live (implemented from the portal's own frontend code, covered by contract tests against a mock): the booking POST response, PSE transfers, gym membership purchase/activation, activity subscribe/unsubscribe. The first real run of each confirms the shape; errors carry the portal's message.
+- Exercised live (2026-11-06, agent-driven): `idrd booking create --yes --confirm` for a paid tennis court, `idrd pay pse --bank 1007 --yes`, `idrd pay status <paymentCode>` → `Aprobado`, `idrd pay history`, `idrd pay pending`, `idrd booking list`. The hold after `booking create` lasts 15 minutes; `pay status` takes the payment code, not the booking id; a bank rejection shows as `FALLIDO`/`NOT_AUTHORIZED` in `pay history` with no charge.
+- Not exercised live (implemented from the portal's own frontend code, covered by contract tests against a mock): gym membership purchase/activation, activity subscribe/unsubscribe. The first real run of each confirms the shape; errors carry the portal's message.
 - The 4 h/week cap is enforced by the portal, not pre-checked by the CLI.
 - Not covered: Daviplata payment (PSE only), the recreation calendar (`/api/recreation`), social programs and the contractor portal.

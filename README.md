@@ -22,6 +22,8 @@ Próximos pasos:
 
 > **Proyecto no oficial.** No está afiliado al IDRD ni al CEFE Chapinero. Usas tu propia cuenta de cada sistema. Nunca reserva ni paga sin que lo confirmes de forma explícita.
 
+**Validado en vivo.** El 6 de noviembre de 2026 un agente de IA reservó y pagó una cancha de tenis del IDRD de punta a punta con este CLI: `find` → `book` → `pay pse` → pago PSE en Bancolombia → `pay status` con el pago **aprobado** y la reserva visible en el portal. La persona solo aprobó el pago en su banco. El detalle, y lo que sigue sin ejecutarse en vivo, está en [Estado del proyecto](#estado-del-proyecto).
+
 ---
 
 ## Contenido
@@ -99,7 +101,29 @@ La vista previa corre contra el sistema real: disponibilidad en ese momento, reg
 | Unidad | horas en punto; piscinas por carril (`--lane`); coliseos por deporte (`--sport-id`); asadores por bloque | franjas de 60 min publicadas por la piscina (`--time 07:15`) |
 | Reglas | máx. 2 h, 24 h de anticipación, semana publicada | una reserva por día, perfil completo (teléfono, estrato, nacimiento) |
 | Cancelar | **no existe**: por eso exige `--yes --confirm <intent>` | hasta 6 h antes: `cupo cefe booking cancel <id> --yes` |
-| Pagar | link PSE con `cupo idrd pay pse`; gratis se confirma solo | `--pay efectivo` (en la sede), `--pay wompi` (en la web), `--pay creditos`; 10.000 COP por persona desde el 5-nov-2026 |
+| Pagar | `cupo idrd pay pse <reserva> --bank <código> --yes` devuelve el link PSE; la retención dura **15 minutos**; `cupo idrd pay status <código de pago>` confirma el **Aprobado**; gratis se confirma solo | `--pay efectivo` (en la sede), `--pay wompi` (en la web), `--pay creditos`; 10.000 COP por persona desde el 5-nov-2026 |
+
+### Una reserva paga, de punta a punta
+
+Esta es la secuencia exacta que se ejecutó en vivo el 6-nov-2026 (cancha de tenis 3032, Cerros de Santa Bárbara Alta, domingo 17:00):
+
+```bash
+cupo idrd auth login
+cupo find --sport tennis --date dom --from 17
+cupo book idrd:3032 --date dom --hour 17
+cupo book idrd:3032 --date dom --hour 17 --yes --confirm 3032@2026-11-08T17x1
+cupo idrd pay banks
+cupo idrd pay pse 875972 --bank 1007 --yes --open
+cupo idrd pay status e4334d5c-da2a-11f1-b009-0242c0a81f05
+```
+
+1. La vista previa de `book` imprime el **intent** (`3032@2026-11-08T17x1`) que tienes que repetir en `--confirm`.
+2. Al reservar de verdad, el portal devuelve el **número de reserva**, el **valor** y hasta qué hora queda retenido el cupo: **15 minutos** desde la creación. Si no pagas en ese tiempo, la reserva se libera sola.
+3. `pay pse` crea la orden de pago en el banco que elijas (`pay banks` lista los códigos; `1007` es Bancolombia) e imprime el link PSE. Con `--open` lo abre en el navegador. Nadie más debe usar ese link.
+4. Pagas en tu banco. El CLI no interviene.
+5. `pay status` recibe el **código de pago** que imprimió `pay pse` (no el número de reserva) y lee el estado real en el portal: `Aprobado`. El comprobante queda en `https://portalciudadano.idrd.gov.co/app/pagos/comprobante/<código de pago>`.
+
+Si el banco rechaza la transacción, `cupo idrd pay history` lo muestra como `FALLIDO` / `NOT_AUTHORIZED`: no se cobró nada y, pasados los 15 minutos, la reserva se libera. Para volver a intentarlo hay que reservar de nuevo con `cupo book` y generar otro link.
 
 ## Lo demás que cada sistema ofrece
 
@@ -116,9 +140,10 @@ La vista previa corre contra el sistema real: disponibilidad en ese momento, reg
 3. **Revisión en vivo justo antes de reservar.** Se verifica que el horario siga libre, las reglas del portal (máximo 2 horas seguidas, 24 horas de anticipación, solo la semana publicada) y tu sesión.
 4. **Registro antes de actuar.** Cada reserva o pago deja un registro en `~/.cupo/audit/` *antes* de llamar al portal.
 5. **Killswitch.** `cupo killswitch on` bloquea cualquier reserva o pago, sin importar las opciones que se pasen.
-6. **El pago es tuyo.** El CLI nunca toca tarjetas ni claves del banco. Para reservas pagas solo te entrega el link de PSE.
+6. **El pago es tuyo.** El CLI nunca toca tarjetas ni claves del banco. Para reservas pagas solo te entrega el link de PSE y, cuando quieras, lee el estado real del pago con `cupo idrd pay status <código>`.
 
 Reglas del portal que conviene saber: la semana se publica los **lunes a las 9:00 a.m.**, se reserva con **24 horas** de anticipación como mínimo, se permiten **máximo 2 horas por día y 4 por semana**, y **no hay devolución** por inasistencia.
+
 ## Para agentes de IA
 
 Empieza por `cupo schema`: trae `start` (los tres comandos del job), `providers` y cada comando con su `provider`. Luego `cupo providers` para saber dónde hay sesión.
@@ -129,6 +154,7 @@ Empieza por `cupo schema`: trae `start` (los tres comandos del job), `providers`
 - `nextSteps` siempre son comandos reales y ejecutables; en `cupo find`, cada resultado trae su `bookCommand`.
 - Códigos de salida: `0` ok · `2` uso o regla · `3` falta sesión · `4` no existe · `5` rechazado (falta confirmación, killswitch, sin cupo) · `6` proveedor o red.
 - Nunca se queda esperando: si falta algo, falla con un error estructurado. Contraseñas sin terminal: `IDRD_PASSWORD`, `CEFE_PASSWORD` o `--password-stdin`.
+- El flujo completo (iniciar sesión, buscar, reservar, generar el pago y verificarlo) ya lo ejecutó un agente en vivo contra el IDRD; la persona solo eligió el banco y aprobó el pago. La secuencia está en [Una reserva paga, de punta a punta](#una-reserva-paga-de-punta-a-punta).
 - Manual para agentes: [`skills/cupo/SKILL.md`](skills/cupo/SKILL.md). Instálalo con `npx skills add huayaney-exe/cupo-ciudadano-cli`.
 
 ## Solución de problemas
@@ -155,7 +181,13 @@ El correo o la contraseña no coinciden con tu cuenta del portal. Pruébalos dir
 El portal cambió su configuración de login. Borra `~/.cupo/web-client.json` y vuelve a intentar. Si sigue fallando, abre un issue.
 
 **`rule/violation` o `slot/unavailable` al reservar.**
-El horario no cumple una regla del portal o ya lo tomó otra persona. El mensaje dice cuál fue el problema. Corre `cupo cupo idrd slot list <cancha> --date <día> --free` para ver alternativas.
+El horario no cumple una regla del portal o ya lo tomó otra persona. El mensaje dice cuál fue el problema. Corre `cupo idrd slot list <cancha> --date <día> --free` para ver alternativas.
+
+**`upstream/error` con `HTTP 500` en `cupo idrd pay status`.**
+Le pasaste el número de reserva. Ese comando recibe el **código de pago** (el UUID que imprime `pay pse`), no la reserva. Si lo perdiste, `cupo idrd pay history` lista todos tus pagos con su código.
+
+**`cupo idrd pay history` muestra `FALLIDO` / `NOT_AUTHORIZED`.**
+El banco rechazó la transacción. El CLI generó el link correctamente y no se cobró nada. La retención de la reserva vence 15 minutos después de crearla: si ya venció, vuelve a reservar con `cupo book` y genera un link nuevo.
 
 **Cualquier otro error.**
 `cupo doctor` muestra qué está fallando. Si agregas `DEBUG=1` antes del comando, verás el detalle técnico.
@@ -174,6 +206,7 @@ Todo queda en tu equipo, en `~/.cupo/` (puedes cambiar la ubicación con `CUPO_H
 | `KILLSWITCH` | Si existe, toda escritura queda bloqueada |
 
 Tu contraseña **nunca** se guarda en disco. El CLI no envía datos a ningún servicio distinto del portal del IDRD, salvo una consulta a `api.ipify.org` para obtener tu IP pública, que la pasarela PSE exige al generar un pago.
+
 ## Estado del proyecto
 
 Qué está verificado contra los sistemas reales y qué no.
@@ -183,15 +216,18 @@ Qué está verificado contra los sistemas reales y qué no.
 | Buscar espacios y horarios: canchas (5 deportes), piscinas por carril, asadores, gimnasios, coliseos | ✅ Verificado contra el portal real, todas las páginas |
 | Actividades, programas, sedes, categorías | ✅ Verificado contra el portal real |
 | Inicio de sesión · Bancos PSE | ✅ Verificado contra el portal real |
-| Crear reserva y confirmar reserva gratuita o pago PSE | 🟡 Implementado a partir del código del propio portal y cubierto por pruebas con un simulador. **Todavía no se ha ejecutado una reserva real.** |
-| Mensualidad de gimnasio (estado, cotización, compra, activación) | 🟡 Igual: desde el código del portal, sin ejecutar en vivo |
-| Inscripción y retiro de actividades, perfiles, pagos pendientes e historial | 🟡 Igual: desde el código del portal, sin ejecutar en vivo |
+| Reservar una cancha y pagarla por PSE (`book --yes --confirm`, `pay pse`, `pay status`) | ✅ **Ejecutado en vivo el 6-nov-2026**, operado por un agente: reserva de tenis creada, orden PSE con Bancolombia, pago aprobado y reserva visible en el portal. El 9-nov-2026 el banco rechazó un segundo pago: el CLI lo reportó como `FALLIDO` tal cual, no se cobró nada y la retención venció sola. |
+| Tus reservas, historial y pagos pendientes (`booking list`, `pay history`, `pay pending`) | ✅ Verificados en vivo con la cuenta del autor |
+| Reservar piscinas, asadores, gimnasios por hora y coliseos; confirmar reservas gratuitas | 🟡 Mismo flujo y mismas pruebas que las canchas, pero todavía sin una reserva real de esos tipos |
+| Mensualidad de gimnasio (estado, cotización, compra, activación) | 🟡 Desde el código del portal, cubierto por pruebas con un simulador, sin ejecutar en vivo |
+| Inscripción y retiro de actividades, perfiles | 🟡 Igual: desde el código del portal, sin ejecutar en vivo |
 | Tope de 4 horas por semana | ℹ️ Lo valida el portal, no el CLI |
 | CEFE Chapinero: piscinas, cupos, cursos, clases disponibles, promociones | ✅ Verificado contra cefechapinero.com |
 | CEFE Chapinero: sesión, reservas, inscripciones, clases, torneos | 🟡 Desde el código de la web, sin ejecutar en vivo |
 | Pago por Daviplata, calendario de recreación, programas sociales, pago Wompi desde el CLI | ❌ Fuera de alcance |
 
-Si haces la primera reserva real, tu respuesta queda guardada en `~/.cupo/bookings/`. Si algo no coincide con lo esperado, el error muestra el mensaje del portal.
+Cada reserva real queda guardada en `~/.cupo/bookings/` y cada reserva o pago en `~/.cupo/audit/`. Si el portal responde algo distinto a lo esperado, el error muestra su mensaje tal cual.
+
 ## Desarrollo
 
 Para modificar el código necesitas [Bun](https://bun.sh):
@@ -201,7 +237,7 @@ bun install
 bun run check
 ```
 
-`bun run check` corre el typecheck, las 66 pruebas y el build. Después de cambiar algo en `src/`, ejecuta `bun run build` y haz commit también de `dist/cupo.js`: es lo que usa quien instala sin Bun.
+`bun run check` corre el typecheck, las pruebas y el build. Después de cambiar algo en `src/`, ejecuta `bun run build` y haz commit también de `dist/cupo.js`: es lo que usa quien instala sin Bun.
 
 Para probar sin instalar:
 

@@ -129,9 +129,10 @@ A second, unrelated target in the same binary: cefechapinero.com (Next.js SPA ov
 
 **CEFE Chapinero, verified live (anonymous), 2026-11-04:** pools, pool detail, schedule config, pool-slots occupancy, courses, course availability, promotions, public rating summary; three-word dispatch and aliases; 403 mapping. **CEFE, not exercised live:** everything behind login (login response, reservations list/create/cancel, user profile, enrolments, class bookings, tournaments), all read from the SPA's service classes and covered by `tests/contract/cefe.test.ts` against a mock.
 
-**Implemented from the bundle, not exercised live** (no credentials available during the autonomous build, and the owner chose not to create a real booking):
-- `POST /api/parks/schedules/{id}/payment` response shape (fields taken from the component that consumes it).
-- `transferBankFree` / `transferBank` / `status` responses.
+**Exercised live with the owner's account (2026-11-06 and 2026-11-09), driven by an agent through the JSON mode:** `booking create` for a paid tennis court (`POST /api/parks/schedules/{id}/payment`: response shape confirmed, `booking_id`, `amount`, 15-minute hold), `pay pse` (`transferBank` → `payment` code + `bank_url`, Bancolombia), `pay status` by payment code (`Aprobado`), `pay history` (one `APROBADO`; two `FALLIDO`/`NOT_AUTHORIZED` on the 9th, rejected by the bank, no charge, hold expired), `pay pending`, `booking list` (the paid booking appears remotely). The human only chose the bank and approved the payment at the bank.
+
+**Implemented from the bundle, still not exercised live:**
+- `transferBankFree` (free confirmation) response.
 - The refresh grant (standard Passport; the SPA never uses it).
 - Booking for non-tennis scenarios (synthetic fields may route through the legacy SIM system).
 - The 4 h/week cap across the whole park system is not checked client-side (needs the shape of a non-empty `bookings` response).
@@ -139,4 +140,4 @@ A second, unrelated target in the same binary: cefechapinero.com (Next.js SPA ov
 - Activities: `/api/profiles/list` and `/api/profiles/subscriptions` shapes, the subscribe body, and the DELETE.
 - `/api/citizen-portal/pending-to-pay` and `/api/citizen-portal/payments` shapes (returned raw).
 
-All of these are covered by contract tests against a mock that mirrors the observed shapes. The first real booking will confirm them; see `README.md` → "Primera reserva real".
+All of these are covered by contract tests against a mock that mirrors the observed shapes.
