@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { allFiles, mockCefe, readAudit, run, tempHome } from "./harness.ts";
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 
 let home: ReturnType<typeof tempHome>;
 beforeEach(() => { home = tempHome(); });
@@ -26,6 +27,20 @@ describe("cefe auth", () => {
     const out = await run(["cefe", "auth", "logout", "--json"]);
     expect(out.json.data.loggedOut).toBe(true);
     expect((await run(["cefe", "me", "--json"])).code).toBe(3);
+  });
+  test("--save stores the password in ~/.cupo/env and an expired session logs in again by itself", async () => {
+    const calls = mockCefe();
+    const r = await run(["cefe", "auth", "login", "--email", "ana@cefe.co", "--save", "--json"], { CEFE_PASSWORD: PASSWORD });
+    expect(r.code).toBe(0);
+    expect(readFileSync(join(home.dir, "env"), "utf8")).toBe(`CEFE_PASSWORD=${PASSWORD}\n`);
+    const sessionFile = allFiles(home.dir).find((f) => f.includes("/cefe/sessions/") && f.endsWith("current.json"))!;
+    writeFileSync(sessionFile, JSON.stringify({ ...JSON.parse(readFileSync(sessionFile, "utf8")), expiresAt: "2020-01-01T00:00:00.000Z" }));
+    const me = await run(["cefe", "me", "--json"], { CEFE_PASSWORD: undefined });
+    expect(me.code).toBe(0);
+    expect(calls.filter((c) => c.url === "/main/auth/login")).toHaveLength(2);
+    const out = await run(["cefe", "auth", "logout", "--forget", "--json"], { CEFE_PASSWORD: undefined });
+    expect(out.json.data.passwordForgotten).toBe(true);
+    expect((await run(["cefe", "me", "--json"], { CEFE_PASSWORD: undefined })).code).toBe(3);
   });
   test("bad credentials → exit 3; sessions are separate from the IDRD one", async () => {
     mockCefe({ loginStatus: 401 });

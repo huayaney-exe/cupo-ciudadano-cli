@@ -404,7 +404,9 @@ var BOOLEAN_FLAGS = new Set([
   "paid",
   "available",
   "upcoming",
-  "accept-habeas-data"
+  "accept-habeas-data",
+  "save",
+  "forget"
 ]);
 var SHORT_BOOLEANS = new Set(["q", "v", "h", "y"]);
 function parseArgs(argv) {
@@ -1234,7 +1236,7 @@ async function paymentHistory(token) {
 }
 
 // src/idrd/auth.ts
-import { readFileSync as readFileSync6 } from "node:fs";
+import { readFileSync as readFileSync7 } from "node:fs";
 
 // src/cli/agent/prompt-secret.ts
 import { stdin, stderr as stdout } from "node:process";
@@ -1346,6 +1348,115 @@ function clearSession(sessionsDir) {
   }
 }
 
+// src/core/secrets.ts
+import { spawnSync } from "node:child_process";
+import { chmodSync, existsSync as existsSync8, mkdirSync as mkdirSync3, readFileSync as readFileSync6, statSync, writeFileSync as writeFileSync2 } from "node:fs";
+import { join as join7 } from "node:path";
+function secretBackend() {
+  const env = process.env.CUPO_SECRETS;
+  if (env === "keychain" || env === "file" || env === "none")
+    return env;
+  return process.platform === "darwin" && hasSecurityTool() ? "keychain" : "file";
+}
+var securityChecked;
+function hasSecurityTool() {
+  if (securityChecked === undefined)
+    securityChecked = existsSync8("/usr/bin/security");
+  return securityChecked;
+}
+function envFilePath() {
+  return join7(appHome(), "env");
+}
+function readEnvFile() {
+  const file = envFilePath();
+  if (!existsSync8(file))
+    return {};
+  const out = {};
+  for (const raw of readFileSync6(file, "utf8").split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line || line.startsWith("#"))
+      continue;
+    const eq = line.indexOf("=");
+    if (eq <= 0)
+      continue;
+    const key = line.slice(0, eq).trim().replace(/^export\s+/, "");
+    let value = line.slice(eq + 1).trim();
+    if (value.startsWith('"') && value.endsWith('"') || value.startsWith("'") && value.endsWith("'"))
+      value = value.slice(1, -1);
+    out[key] = value;
+  }
+  return out;
+}
+function envFileValue(key) {
+  return readEnvFile()[key];
+}
+function writeEnvFile(values) {
+  const file = envFilePath();
+  const merged = { ...readEnvFile(), ...values };
+  const lines = Object.entries(merged).filter(([, v]) => v !== undefined).map(([k, v]) => `${k}=${v}`);
+  mkdirSync3(appHome(), { recursive: true, mode: 448 });
+  writeFileSync2(file, lines.length ? `${lines.join(`
+`)}
+` : "", { mode: 384 });
+  chmodSync(file, 384);
+}
+var q = (s) => `"${s.replace(/\\/g, "\\\\").replace(/"/g, "\\\"")}"`;
+function keychainRead(service, account) {
+  const r = spawnSync("/usr/bin/security", ["find-generic-password", "-s", service, "-a", account, "-w"], { encoding: "utf8" });
+  if (r.status !== 0)
+    return;
+  const v = r.stdout.replace(/\r?\n$/, "");
+  return v || undefined;
+}
+function keychainWrite(service, account, value) {
+  const r = spawnSync("/usr/bin/security", ["-i"], { input: `add-generic-password -U -s ${q(service)} -a ${q(account)} -w ${q(value)}
+`, encoding: "utf8" });
+  if (r.status !== 0)
+    throw new Error(`security add-generic-password: ${r.stderr.trim() || `exit ${r.status}`}`);
+}
+function keychainDelete(service, account) {
+  const r = spawnSync("/usr/bin/security", ["delete-generic-password", "-s", service, "-a", account], { encoding: "utf8" });
+  return r.status === 0;
+}
+function loadSecret(ref) {
+  const fromFile = envFileValue(ref.envKey);
+  if (fromFile)
+    return { value: fromFile, source: "file" };
+  if (secretBackend() === "keychain") {
+    const v = keychainRead(ref.service, ref.account);
+    if (v)
+      return { value: v, source: "keychain" };
+  }
+  return;
+}
+function saveSecret(ref, value) {
+  const backend = secretBackend();
+  if (backend === "none")
+    throw new Error("CUPO_SECRETS=none: guardar contraseñas está deshabilitado.");
+  if (backend === "keychain") {
+    keychainWrite(ref.service, ref.account, value);
+    return { where: "keychain", detail: `Llavero de macOS (servicio ${ref.service}, cuenta ${ref.account})` };
+  }
+  writeEnvFile({ [ref.envKey]: value });
+  return { where: "file", detail: `${envFilePath()} (permisos 0600)` };
+}
+function forgetSecret(ref) {
+  const file = envFileValue(ref.envKey) !== undefined;
+  if (file)
+    writeEnvFile({ [ref.envKey]: undefined });
+  const keychain = secretBackend() === "keychain" ? keychainDelete(ref.service, ref.account) : false;
+  return { file, keychain };
+}
+function secretLocation(ref) {
+  return loadSecret(ref)?.source ?? null;
+}
+function envFileInsecure() {
+  const file = envFilePath();
+  if (!existsSync8(file) || process.platform === "win32")
+    return false;
+  return (statSync(file).mode & 63) !== 0;
+}
+
 // src/idrd/auth.ts
 var REFRESH_MARGIN_MS = 5 * 60000;
 function storedEmail(profile) {
@@ -1366,53 +1477,90 @@ function persist(profile, email, t, previousRefresh) {
   saveSession(paths.sessions(profile), session);
   return session;
 }
+var secretRef = (email) => ({ service: "cupo-idrd", account: email, envKey: "IDRD_PASSWORD" });
+function knownEmail(profile) {
+  return process.env.IDRD_EMAIL ?? envFileValue("IDRD_EMAIL") ?? storedEmail(profile);
+}
+function savedPassword(email) {
+  return process.env.IDRD_PASSWORD || loadSecret(secretRef(email))?.value;
+}
 async function resolvePassword(opts) {
   if (process.env.IDRD_PASSWORD)
     return process.env.IDRD_PASSWORD;
   if (opts.stdin) {
-    const text = readFileSync6(0, "utf8").split(/\r?\n/)[0] ?? "";
+    const text = readFileSync7(0, "utf8").split(/\r?\n/)[0] ?? "";
     if (!text)
       fail("auth/password-required", "No llegó contraseña por stdin.");
     return text;
+  }
+  if (opts.email) {
+    const saved = loadSecret(secretRef(opts.email));
+    if (saved)
+      return saved.value;
   }
   if (!opts.noInput) {
     const pw = await promptSecret("Contraseña IDRD: ");
     if (pw)
       return pw;
   }
-  return fail("auth/password-required", "Necesito tu contraseña y no hay terminal interactiva.", "Exporta IDRD_PASSWORD o usa --password-stdin. Nunca se guarda en disco.");
+  return fail("auth/password-required", "Necesito tu contraseña y no hay terminal interactiva.", "Exporta IDRD_PASSWORD, usa --password-stdin, o guárdala una vez con `cupo idrd auth login --save`.");
 }
-async function login(profile, email, password) {
+async function login(profile, email, password, opts = {}) {
   const tokens = await passwordGrant(email, password);
   saveConfig(paths.config(), { profiles: { [profileName(profile)]: { email } } });
-  return persist(profile, email, tokens);
+  const session = persist(profile, email, tokens);
+  if (!opts.save)
+    return session;
+  const saved = saveSecret(secretRef(email), password);
+  return { ...session, savedTo: saved.detail };
+}
+function forgetPassword(email) {
+  return forgetSecret(secretRef(email));
+}
+function passwordLocation(email) {
+  return email ? secretLocation(secretRef(email)) : null;
+}
+async function autoLogin(profile, email) {
+  if (!email)
+    return null;
+  const password = savedPassword(email);
+  if (!password)
+    return null;
+  return login(profile, email, password);
 }
 function logoutLocal(profile) {
   clearSession(paths.sessions(profile));
 }
 async function accessToken(profile) {
   const session = currentSession(profile);
-  if (!session)
-    fail("auth/required", "No has iniciado sesión.", "Corre `cupo idrd auth login --email <tu correo>`.");
+  if (!session) {
+    const auto2 = await autoLogin(profile, knownEmail(profile));
+    if (auto2)
+      return { token: auto2.accessToken, session: auto2, refreshed: true };
+    fail("auth/required", "No has iniciado sesión.", "Corre `cupo idrd auth login --email <tu correo>` (con --save no vuelve a pedir la contraseña).");
+  }
   const expiresAt = session.expiresAt ? Date.parse(session.expiresAt) : 0;
   if (expiresAt - Date.now() > REFRESH_MARGIN_MS)
     return { token: session.accessToken, session, refreshed: false };
-  if (!session.refreshToken)
-    fail("auth/expired", "La sesión venció.", "Corre `cupo idrd auth login`.");
-  try {
-    const t = await refreshGrant(session.refreshToken);
-    const next = persist(profile, session.email, t, session.refreshToken);
-    return { token: next.accessToken, session: next, refreshed: true };
-  } catch (err) {
-    if (err instanceof AppError)
-      fail("auth/expired", "La sesión venció y no se pudo renovar.", "Corre `cupo idrd auth login`.", err);
-    throw err;
+  if (session.refreshToken) {
+    try {
+      const t = await refreshGrant(session.refreshToken);
+      const next = persist(profile, session.email, t, session.refreshToken);
+      return { token: next.accessToken, session: next, refreshed: true };
+    } catch (err) {
+      if (!(err instanceof AppError))
+        throw err;
+    }
   }
+  const auto = await autoLogin(profile, session.email);
+  if (auto)
+    return { token: auto.accessToken, session: auto, refreshed: true };
+  return fail("auth/expired", "La sesión venció y no se pudo renovar.", "Corre `cupo idrd auth login` (con --save no vuelve a pedir la contraseña).");
 }
 
 // src/idrd/payment.ts
-import { readdirSync, readFileSync as readFileSync7 } from "node:fs";
-import { join as join7 } from "node:path";
+import { readdirSync, readFileSync as readFileSync8 } from "node:fs";
+import { join as join8 } from "node:path";
 var RECEIPT_BASE = "https://portalciudadano.idrd.gov.co/app/pagos/comprobante/";
 function normalizeBooking(raw, ctx) {
   const id = raw.booking_id ?? raw.id ?? raw.citizen_schedule_id;
@@ -1438,18 +1586,18 @@ function normalizeBooking(raw, ctx) {
   };
 }
 function saveBooking(profile, b) {
-  atomicWriteJson(join7(paths.bookings(profile), `${b.bookingId}.json`), b, { mode: 384 });
+  atomicWriteJson(join8(paths.bookings(profile), `${b.bookingId}.json`), b, { mode: 384 });
 }
 function loadBooking(profile, bookingId) {
   try {
-    return JSON.parse(readFileSync7(join7(paths.bookings(profile), `${bookingId}.json`), "utf8"));
+    return JSON.parse(readFileSync8(join8(paths.bookings(profile), `${bookingId}.json`), "utf8"));
   } catch {
     return fail("not-found/booking", `No tengo registrada la reserva ${bookingId} en este equipo.`, "Solo se puede pagar una reserva creada con `cupo idrd booking create`.");
   }
 }
 function localBookings(profile) {
   try {
-    return readdirSync(paths.bookings(profile)).filter((f) => f.endsWith(".json")).map((f) => JSON.parse(readFileSync7(join7(paths.bookings(profile), f), "utf8")));
+    return readdirSync(paths.bookings(profile)).filter((f) => f.endsWith(".json")).map((f) => JSON.parse(readFileSync8(join8(paths.bookings(profile), f), "utf8")));
   } catch {
     return [];
   }
@@ -1649,18 +1797,19 @@ var COMMANDS = [
   },
   {
     name: "idrd auth login",
-    summary: "Inicia sesión (OAuth del portal). Guarda solo el token y tu correo; nunca la contraseña.",
+    summary: "Inicia sesión (OAuth del portal). Guarda el token y tu correo. La contraseña solo con --save: Llavero de macOS o ~/.cupo/env (0600); entonces la sesión se renueva sola al vencer.",
     flags: [
       { flag: "--email <correo>", description: "Correo de tu cuenta (se recuerda)" },
-      { flag: "--password-stdin", description: "Lee la contraseña de stdin (o usa IDRD_PASSWORD)" }
+      { flag: "--password-stdin", description: "Lee la contraseña de stdin (o usa IDRD_PASSWORD)" },
+      { flag: "--save", description: "Guarda la contraseña (Llavero en macOS, ~/.cupo/env en Linux) para no volver a pedirla" }
     ],
     trust: "T1",
     auth: false,
-    output: "{email, expiresAt, refreshable, user{id,name,verified,hasProfile}}",
-    examples: ["cupo idrd auth login --email yo@correo.com", "IDRD_PASSWORD=… cupo idrd auth login --email yo@correo.com --json"]
+    output: "{email, expiresAt, refreshable, passwordSaved, user{id,name,verified,hasProfile}}",
+    examples: ["cupo idrd auth login --email yo@correo.com --save", "IDRD_PASSWORD=… cupo idrd auth login --email yo@correo.com --json"]
   },
-  { name: "idrd auth status", summary: "Estado de la sesión, con una llamada real al portal.", trust: "T0", auth: false, output: "{loggedIn, email, expiresAt, expired, refreshable, user?}" },
-  { name: "idrd auth logout", summary: "Cierra sesión en el portal y borra el token local.", trust: "T1", auth: true, output: "{loggedOut}" },
+  { name: "idrd auth status", summary: "Estado de la sesión, con una llamada real al portal.", trust: "T0", auth: false, output: "{loggedIn, email, expiresAt, expired, refreshable, passwordStored, user?}" },
+  { name: "idrd auth logout", summary: "Cierra sesión en el portal y borra el token local. Con --forget borra también la contraseña guardada.", flags: [{ flag: "--forget", description: "Borra la contraseña guardada con --save" }], trust: "T1", auth: true, output: "{loggedOut, passwordForgotten}" },
   {
     name: "idrd booking list",
     summary: "Tus reservas en el portal, más las creadas desde este equipo.",
@@ -1766,9 +1915,9 @@ var COMMANDS = [
   },
   { name: "idrd activity unsubscribe", summary: "Retira una inscripción.", args: [{ name: "subscriptionId", description: "id de la inscripción (ver `activity mine`)" }], flags: [{ flag: "--yes", description: "Confirma" }], trust: "T2", auth: true, output: "{subscriptionId, unsubscribed}" },
   { name: "idrd profile list", summary: "Perfiles de tu cuenta (titular y beneficiarios) para inscripciones y reservas CEFE.", trust: "T0", auth: true, output: "{profiles[], beneficiaries[]}" },
-  { name: "cefe auth login", summary: "Inicia sesión en CEFE Chapinero (cuenta distinta a la del IDRD). Guarda el token y tu correo; nunca la contraseña.", flags: [{ flag: "--email <correo>", description: "Correo de tu cuenta (se recuerda)" }, { flag: "--password-stdin", description: "Lee la contraseña de stdin (o usa CEFE_PASSWORD)" }], trust: "T1", auth: false, output: "{email, expiresAt, user{userId,name,credits,reservasDisponibles,dependents[]}, missingForBooking[]}", examples: ["cupo cefe auth login --email yo@correo.com"] },
-  { name: "cefe auth status", summary: "Estado de la sesión CEFE, con una llamada real.", trust: "T0", auth: false, output: "{loggedIn, email, expiresAt, user?}" },
-  { name: "cefe auth logout", summary: "Borra el token local de CEFE.", trust: "T1", auth: false, output: "{loggedOut}" },
+  { name: "cefe auth login", summary: "Inicia sesión en CEFE Chapinero (cuenta distinta a la del IDRD). Guarda el token y tu correo. La contraseña solo con --save (Llavero o ~/.cupo/env); entonces la sesión se renueva sola.", flags: [{ flag: "--email <correo>", description: "Correo de tu cuenta (se recuerda)" }, { flag: "--password-stdin", description: "Lee la contraseña de stdin (o usa CEFE_PASSWORD)" }, { flag: "--save", description: "Guarda la contraseña para no volver a pedirla" }], trust: "T1", auth: false, output: "{email, expiresAt, passwordSaved, user{userId,name,credits,reservasDisponibles,dependents[]}, missingForBooking[]}", examples: ["cupo cefe auth login --email yo@correo.com --save"] },
+  { name: "cefe auth status", summary: "Estado de la sesión CEFE, con una llamada real.", trust: "T0", auth: false, output: "{loggedIn, email, expiresAt, passwordStored, user?}" },
+  { name: "cefe auth logout", summary: "Borra el token local de CEFE. Con --forget borra también la contraseña guardada.", flags: [{ flag: "--forget", description: "Borra la contraseña guardada con --save" }], trust: "T1", auth: false, output: "{loggedOut, passwordForgotten}" },
   { name: "cefe auth register", summary: "Crea una cuenta en CEFE Chapinero (exige --accept-habeas-data).", flags: [{ flag: "--name <nombre> --email <correo> --phone <tel> --document <num> [--document-type CC]", description: "Datos de la cuenta" }, { flag: "--accept-habeas-data", description: "Aceptas el tratamiento de datos personales" }], trust: "T2", auth: false, output: "{email, user}" },
   { name: "cefe me", summary: "Tu perfil CEFE: documento, teléfono, estrato, créditos, reservas disponibles, dependientes; y qué falta para reservar.", trust: "T0", auth: true, output: "CefeUser + missingForBooking[]" },
   { name: "cefe pool list", summary: "Piscinas del CEFE Chapinero con capacidad y horario.", flags: [{ flag: "--all", description: "Incluye inactivas" }], trust: "T0", auth: false, output: "Pool[] {poolId, name, capacity, pricePerHour, active, hours[]}" },
@@ -1834,7 +1983,140 @@ function table(headers, rows, maxWidths = []) {
 }
 
 // src/cefe/auth.ts
-import { readFileSync as readFileSync8 } from "node:fs";
+import { readFileSync as readFileSync9 } from "node:fs";
+
+// src/idrd/time.ts
+var TZ = "America/Bogota";
+var nowImpl = () => new Date;
+function nowMs() {
+  return nowImpl().getTime();
+}
+function bogotaNow() {
+  const parts = Object.fromEntries(new Intl.DateTimeFormat("en-CA", {
+    timeZone: TZ,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23"
+  }).formatToParts(nowImpl()).map((p) => [p.type, p.value]));
+  const date = `${parts.year}-${parts.month}-${parts.day}`;
+  return { date, hour: Number(parts.hour), minute: Number(parts.minute), isoWeekday: isoWeekday(date) };
+}
+function isoWeekday(date) {
+  const d = new Date(`${date}T12:00:00Z`).getUTCDay();
+  return d === 0 ? 7 : d;
+}
+function addDays(date, n) {
+  const d = new Date(`${date}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+var WEEKDAYS = {
+  lun: 1,
+  lunes: 1,
+  mon: 1,
+  monday: 1,
+  mar: 2,
+  martes: 2,
+  tue: 2,
+  tuesday: 2,
+  mie: 3,
+  mié: 3,
+  miercoles: 3,
+  miércoles: 3,
+  wed: 3,
+  wednesday: 3,
+  jue: 4,
+  jueves: 4,
+  thu: 4,
+  thursday: 4,
+  vie: 5,
+  viernes: 5,
+  fri: 5,
+  friday: 5,
+  sab: 6,
+  sáb: 6,
+  sabado: 6,
+  sábado: 6,
+  sat: 6,
+  saturday: 6,
+  dom: 7,
+  domingo: 7,
+  sun: 7,
+  sunday: 7
+};
+function parseDate(input) {
+  const today = bogotaNow().date;
+  if (!input)
+    return today;
+  const s = input.trim().toLowerCase();
+  if (s === "hoy" || s === "today")
+    return today;
+  if (s === "mañana" || s === "manana" || s === "tomorrow")
+    return addDays(today, 1);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+    const d = new Date(`${s}T12:00:00Z`);
+    if (Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== s)
+      fail("usage/bad-date", `Fecha inválida: ${input}.`);
+    return s;
+  }
+  const wd = WEEKDAYS[s];
+  if (wd) {
+    const delta = (wd - isoWeekday(today) + 7) % 7;
+    return addDays(today, delta);
+  }
+  return fail("usage/bad-date", `No entiendo la fecha "${input}".`, "Usa YYYY-MM-DD, hoy, mañana o un día (lun, mar, mie…).");
+}
+function parseHour(input) {
+  if (input === undefined)
+    return fail("usage/missing-hour", "Falta la hora.", 'Ej: --hora 6 o --hora "6:00 AM".');
+  const s = input.trim().toLowerCase().replace(/\s+/g, "");
+  const m = /^(\d{1,2})(?::(\d{2}))?(am|pm|a\.m\.|p\.m\.)?$/.exec(s);
+  if (!m)
+    return fail("usage/bad-hour", `Hora inválida: ${input}.`);
+  let h = Number(m[1]);
+  const min = m[2] ? Number(m[2]) : 0;
+  const mer = m[3]?.replace(/\./g, "");
+  if (min !== 0)
+    fail("usage/bad-hour", "Las reservas son por horas en punto.", `Usa ${h}:00.`);
+  if (mer === "pm" && h < 12)
+    h += 12;
+  if (mer === "am" && h === 12)
+    h = 0;
+  if (h < 0 || h > 23 || mer && Number(m[1]) > 12)
+    fail("usage/bad-hour", `Hora fuera de rango: ${input}.`);
+  return h;
+}
+function hourLabel(h) {
+  const mer = h < 12 ? "AM" : "PM";
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  return `${h12}:00 ${mer}`;
+}
+function hh(h) {
+  return `${String(h).padStart(2, "0")}:00`;
+}
+function short(h) {
+  const m = h % 24 < 12 ? "AM" : "PM";
+  return { n: h % 12 === 0 ? 12 : h % 12, m };
+}
+function rangeLabel(run) {
+  const a = short(run[0]);
+  const b = short(run[run.length - 1] + 1);
+  return a.m === b.m ? `${a.n}–${b.n} ${b.m}` : `${a.n} ${a.m}–${b.n} ${b.m}`;
+}
+function rangesLabel(hours) {
+  const runs = [];
+  for (const h of [...hours].sort((x, y) => x - y)) {
+    const last = runs[runs.length - 1];
+    if (last && last[last.length - 1] === h - 1)
+      last.push(h);
+    else
+      runs.push([h]);
+  }
+  return runs.map(rangeLabel).join(", ");
+}
 
 // src/cefe/api.ts
 async function call(path, opts) {
@@ -2091,21 +2373,39 @@ function tokenExpiry(token, now = Date.now()) {
   } catch {}
   return new Date(now + 12 * 3600000).toISOString();
 }
+var secretRef2 = (email) => ({ service: "cupo-cefe", account: email, envKey: "CEFE_PASSWORD" });
+function knownEmail2(profile) {
+  return process.env.CEFE_EMAIL ?? envFileValue("CEFE_EMAIL") ?? storedEmail2(profile);
+}
+function savedPassword2(email) {
+  return process.env.CEFE_PASSWORD || loadSecret(secretRef2(email))?.value;
+}
 async function resolvePassword2(opts) {
   if (process.env.CEFE_PASSWORD)
     return process.env.CEFE_PASSWORD;
   if (opts.stdin) {
-    const text = readFileSync8(0, "utf8").split(/\r?\n/)[0] ?? "";
+    const text = readFileSync9(0, "utf8").split(/\r?\n/)[0] ?? "";
     if (!text)
       fail("auth/password-required", "No llegó contraseña por stdin.");
     return text;
+  }
+  if (opts.email) {
+    const saved = loadSecret(secretRef2(opts.email));
+    if (saved)
+      return saved.value;
   }
   if (!opts.noInput) {
     const pw = await promptSecret("Contraseña CEFE Chapinero: ");
     if (pw)
       return pw;
   }
-  return fail("auth/password-required", "Necesito tu contraseña y no hay terminal interactiva.", "Exporta CEFE_PASSWORD o usa --password-stdin. Nunca se guarda en disco.");
+  return fail("auth/password-required", "Necesito tu contraseña y no hay terminal interactiva.", "Exporta CEFE_PASSWORD, usa --password-stdin, o guárdala una vez con `cupo cefe auth login --save`.");
+}
+function forgetPassword2(email) {
+  return forgetSecret(secretRef2(email));
+}
+function passwordLocation2(email) {
+  return email ? secretLocation(secretRef2(email)) : null;
 }
 function persistSession(profile, email, token, user) {
   const session = { createdAt: new Date().toISOString(), expiresAt: tokenExpiry(token), email, token, user };
@@ -2113,153 +2413,29 @@ function persistSession(profile, email, token, user) {
   saveConfig(paths.cefe.config(), { profiles: { [profileName(profile)]: { email } } });
   return session;
 }
-async function login3(profile, email, password) {
+async function login3(profile, email, password, opts = {}) {
   const { token, user } = await login2(email, password);
-  return persistSession(profile, email, token, user);
+  const session = persistSession(profile, email, token, user);
+  if (!opts.save)
+    return session;
+  const saved = saveSecret(secretRef2(email), password);
+  return { ...session, savedTo: saved.detail };
 }
 function logoutLocal2(profile) {
   clearSession(paths.cefe.sessions(profile));
 }
-function requireSession(profile) {
+async function requireSession(profile) {
   const s = currentSession2(profile);
-  if (!s)
-    fail("auth/required", "No has iniciado sesión en CEFE Chapinero.", "Corre `cupo cefe auth login --email <tu correo>`.");
-  if (s.expiresAt && Date.parse(s.expiresAt) < Date.now())
-    fail("auth/expired", "La sesión de CEFE Chapinero venció.", "Corre `cupo cefe auth login` de nuevo.");
-  return s;
-}
-
-// src/idrd/time.ts
-var TZ = "America/Bogota";
-var nowImpl = () => new Date;
-function nowMs() {
-  return nowImpl().getTime();
-}
-function bogotaNow() {
-  const parts = Object.fromEntries(new Intl.DateTimeFormat("en-CA", {
-    timeZone: TZ,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hourCycle: "h23"
-  }).formatToParts(nowImpl()).map((p) => [p.type, p.value]));
-  const date = `${parts.year}-${parts.month}-${parts.day}`;
-  return { date, hour: Number(parts.hour), minute: Number(parts.minute), isoWeekday: isoWeekday(date) };
-}
-function isoWeekday(date) {
-  const d = new Date(`${date}T12:00:00Z`).getUTCDay();
-  return d === 0 ? 7 : d;
-}
-function addDays(date, n) {
-  const d = new Date(`${date}T12:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + n);
-  return d.toISOString().slice(0, 10);
-}
-var WEEKDAYS = {
-  lun: 1,
-  lunes: 1,
-  mon: 1,
-  monday: 1,
-  mar: 2,
-  martes: 2,
-  tue: 2,
-  tuesday: 2,
-  mie: 3,
-  mié: 3,
-  miercoles: 3,
-  miércoles: 3,
-  wed: 3,
-  wednesday: 3,
-  jue: 4,
-  jueves: 4,
-  thu: 4,
-  thursday: 4,
-  vie: 5,
-  viernes: 5,
-  fri: 5,
-  friday: 5,
-  sab: 6,
-  sáb: 6,
-  sabado: 6,
-  sábado: 6,
-  sat: 6,
-  saturday: 6,
-  dom: 7,
-  domingo: 7,
-  sun: 7,
-  sunday: 7
-};
-function parseDate(input) {
-  const today = bogotaNow().date;
-  if (!input)
-    return today;
-  const s = input.trim().toLowerCase();
-  if (s === "hoy" || s === "today")
-    return today;
-  if (s === "mañana" || s === "manana" || s === "tomorrow")
-    return addDays(today, 1);
-  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
-    const d = new Date(`${s}T12:00:00Z`);
-    if (Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== s)
-      fail("usage/bad-date", `Fecha inválida: ${input}.`);
+  const expired = Boolean(s?.expiresAt && Date.parse(s.expiresAt) < nowMs());
+  if (s && !expired)
     return s;
-  }
-  const wd = WEEKDAYS[s];
-  if (wd) {
-    const delta = (wd - isoWeekday(today) + 7) % 7;
-    return addDays(today, delta);
-  }
-  return fail("usage/bad-date", `No entiendo la fecha "${input}".`, "Usa YYYY-MM-DD, hoy, mañana o un día (lun, mar, mie…).");
-}
-function parseHour(input) {
-  if (input === undefined)
-    return fail("usage/missing-hour", "Falta la hora.", 'Ej: --hora 6 o --hora "6:00 AM".');
-  const s = input.trim().toLowerCase().replace(/\s+/g, "");
-  const m = /^(\d{1,2})(?::(\d{2}))?(am|pm|a\.m\.|p\.m\.)?$/.exec(s);
-  if (!m)
-    return fail("usage/bad-hour", `Hora inválida: ${input}.`);
-  let h = Number(m[1]);
-  const min = m[2] ? Number(m[2]) : 0;
-  const mer = m[3]?.replace(/\./g, "");
-  if (min !== 0)
-    fail("usage/bad-hour", "Las reservas son por horas en punto.", `Usa ${h}:00.`);
-  if (mer === "pm" && h < 12)
-    h += 12;
-  if (mer === "am" && h === 12)
-    h = 0;
-  if (h < 0 || h > 23 || mer && Number(m[1]) > 12)
-    fail("usage/bad-hour", `Hora fuera de rango: ${input}.`);
-  return h;
-}
-function hourLabel(h) {
-  const mer = h < 12 ? "AM" : "PM";
-  const h12 = h % 12 === 0 ? 12 : h % 12;
-  return `${h12}:00 ${mer}`;
-}
-function hh(h) {
-  return `${String(h).padStart(2, "0")}:00`;
-}
-function short(h) {
-  const m = h % 24 < 12 ? "AM" : "PM";
-  return { n: h % 12 === 0 ? 12 : h % 12, m };
-}
-function rangeLabel(run) {
-  const a = short(run[0]);
-  const b = short(run[run.length - 1] + 1);
-  return a.m === b.m ? `${a.n}–${b.n} ${b.m}` : `${a.n} ${a.m}–${b.n} ${b.m}`;
-}
-function rangesLabel(hours) {
-  const runs = [];
-  for (const h of [...hours].sort((x, y) => x - y)) {
-    const last = runs[runs.length - 1];
-    if (last && last[last.length - 1] === h - 1)
-      last.push(h);
-    else
-      runs.push([h]);
-  }
-  return runs.map(rangeLabel).join(", ");
+  const email = s?.email ?? knownEmail2(profile);
+  const password = email ? savedPassword2(email) : undefined;
+  if (email && password)
+    return login3(profile, email, password);
+  if (!s)
+    return fail("auth/required", "No has iniciado sesión en CEFE Chapinero.", "Corre `cupo cefe auth login --email <tu correo>` (con --save no vuelve a pedir la contraseña).");
+  return fail("auth/expired", "La sesión de CEFE Chapinero venció.", "Corre `cupo cefe auth login` de nuevo (con --save no vuelve a pedir la contraseña).");
 }
 
 // src/cli/agent/trust-ladder.ts
@@ -2328,9 +2504,9 @@ function renderPreview(preview, opts = {}) {
 }
 
 // src/cli/foundation/audit-lifecycle.ts
-import { appendFileSync, mkdirSync as mkdirSync3 } from "node:fs";
+import { appendFileSync, mkdirSync as mkdirSync4 } from "node:fs";
 import { randomUUID } from "node:crypto";
-import { join as join8 } from "node:path";
+import { join as join9 } from "node:path";
 function todayFilename() {
   return `${new Date().toISOString().slice(0, 10)}.jsonl`;
 }
@@ -2355,8 +2531,8 @@ function beginAudit(auditDir, record, opts = {}) {
   };
 }
 function appendLifecycleRecord(auditDir, record, result, meta = {}) {
-  mkdirSync3(auditDir, { recursive: true });
-  const file = join8(auditDir, todayFilename());
+  mkdirSync4(auditDir, { recursive: true });
+  const file = join9(auditDir, todayFilename());
   const stored = {
     ts: new Date().toISOString(),
     ...record,
@@ -2456,14 +2632,17 @@ async function resolvePool(raw) {
   return fail("not-found/resource", `No encontré la piscina "${raw}".`, `Opciones: ${pools.map((p) => `${p.name} (${p.poolId})`).join(" · ")}`);
 }
 async function cefeLogin(ctx) {
-  const email = str(ctx.args, "email") ?? process.env.CEFE_EMAIL ?? storedEmail2(ctx.flags.profile);
+  const email = str(ctx.args, "email") ?? knownEmail2(ctx.flags.profile);
   if (!email)
     fail("usage/missing-flag", "Falta tu correo.", "Usa --email <correo> (se recuerda para la próxima).");
-  const password = await resolvePassword2({ stdin: Boolean(ctx.args.passwordStdin), noInput: ctx.flags.noInput });
-  const s = await login3(ctx.flags.profile, email, password);
+  const save = ctx.args.save === true;
+  if (save && secretBackend() === "none")
+    fail("usage/bad-flag", "CUPO_SECRETS=none: guardar la contraseña está deshabilitado.", "Quita CUPO_SECRETS o ponlo en keychain|file.");
+  const password = await resolvePassword2({ stdin: Boolean(ctx.args.passwordStdin), noInput: ctx.flags.noInput, email });
+  const s = await login3(ctx.flags.profile, email, password, { save });
   const missing = profileGaps(s.user);
   return {
-    data: { email, expiresAt: s.expiresAt, user: { ...s.user, raw: undefined }, missingForBooking: missing },
+    data: { email, expiresAt: s.expiresAt, passwordSaved: save ? s.savedTo ?? null : null, user: { ...s.user, raw: undefined }, missingForBooking: missing },
     human: () => `${ok("✓")} Sesión CEFE Chapinero iniciada como ${bold(email)} (${s.user.name})
   ${muted(`Créditos: ${s.user.credits} · Reservas disponibles: ${s.user.reservasDisponibles} · Dependientes: ${s.user.dependents.length}`)}${missing.length ? `
   ${warn("!")} Para reservar falta en tu perfil: ${missing.join(", ")} (cefechapinero.com/client/profile)` : ""}`,
@@ -2493,14 +2672,17 @@ async function cefeStatus(ctx) {
     liveCheck = e instanceof Error ? e.message : String(e);
   }
   return {
-    data: { loggedIn: user !== null, email: s.email, expiresAt: s.expiresAt, liveCheck, user: user ? { ...user, raw: undefined } : null },
+    data: { loggedIn: user !== null, email: s.email, expiresAt: s.expiresAt, passwordStored: passwordLocation2(s.email), liveCheck, user: user ? { ...user, raw: undefined } : null },
     human: () => user ? `${ok("●")} Sesión CEFE activa: ${bold(s.email)} (${user.name})
   ${muted(`Vence: ${s.expiresAt} · créditos ${user.credits} · reservas disponibles ${user.reservasDisponibles}`)}` : `${danger("●")} Sesión guardada pero no válida: ${liveCheck}`
   };
 }
 async function cefeLogout(ctx) {
+  const email = currentSession2(ctx.flags.profile)?.email ?? knownEmail2(ctx.flags.profile);
   logoutLocal2(ctx.flags.profile);
-  return { data: { loggedOut: true }, human: () => `${ok("✓")} Sesión CEFE cerrada (token local borrado; el servidor no tiene logout).` };
+  const forgotten = ctx.args.forget === true && email ? forgetPassword2(email) : null;
+  const forgot = Boolean(forgotten && (forgotten.file || forgotten.keychain));
+  return { data: { loggedOut: true, passwordForgotten: forgot }, human: () => `${ok("✓")} Sesión CEFE cerrada (token local borrado; el servidor no tiene logout).${forgot ? " Contraseña guardada eliminada." : ""}` };
 }
 async function cefeRegister(ctx) {
   const body = {
@@ -2528,7 +2710,7 @@ async function cefeRegister(ctx) {
   }
 }
 async function cefeMe(ctx) {
-  const s = requireSession(ctx.flags.profile);
+  const s = await requireSession(ctx.flags.profile);
   const u = await getUser(s.token, s.user.userId);
   persistSession(ctx.flags.profile, s.email, s.token, u);
   const missing = profileGaps(u);
@@ -2652,7 +2834,7 @@ function parsePay(raw, price) {
   return fail("usage/bad-arg", `Método de pago desconocido: ${raw}.`, "Opciones: efectivo (en la sede), wompi (en la web), creditos.");
 }
 async function cefeBookingCreate(ctx) {
-  const s = requireSession(ctx.flags.profile);
+  const s = await requireSession(ctx.flags.profile);
   const pool = await resolvePool(positional(ctx.args, 0, "pool"));
   const date = parseDate(requireStr(ctx.args, "date"));
   const time = parseTime(str(ctx.args, "time") ?? str(ctx.args, "hour"));
@@ -2734,7 +2916,7 @@ async function cefeBookingCreate(ctx) {
   }
 }
 async function cefeBookingList(ctx) {
-  const s = requireSession(ctx.flags.profile);
+  const s = await requireSession(ctx.flags.profile);
   const from = str(ctx.args, "from") ? parseDate(str(ctx.args, "from")) : undefined;
   const to = str(ctx.args, "to") ? parseDate(str(ctx.args, "to")) : undefined;
   const date = str(ctx.args, "date") ? parseDate(str(ctx.args, "date")) : undefined;
@@ -2751,7 +2933,7 @@ async function cefeBookingList(ctx) {
   };
 }
 async function cefeBookingCancel(ctx) {
-  const s = requireSession(ctx.flags.profile);
+  const s = await requireSession(ctx.flags.profile);
   const id = positional(ctx.args, 0, "reservationId");
   const list = await userReservations(s.token, s.user.userId);
   const r = list.find((x) => x.id === id);
@@ -2825,7 +3007,7 @@ Sin clases publicadas entre ${from} y ${to}.`),
   };
 }
 async function cefeCourseMine(ctx) {
-  const s = requireSession(ctx.flags.profile);
+  const s = await requireSession(ctx.flags.profile);
   const [mine, classes] = await Promise.all([userCourses(s.token, s.user.userId), classBookings(s.token, s.user.userId).catch(() => [])]);
   return {
     data: { enrollments: mine, classes },
@@ -2844,7 +3026,7 @@ function gateCheck() {
   return { name: "portal", ok: !closed, detail: closed ? "la web del CEFE tiene deshabilitadas inscripciones y clases desde el 30 de julio de 2026; el servidor puede rechazarlo" : "habilitado" };
 }
 async function cefeCourseEnroll(ctx) {
-  const s = requireSession(ctx.flags.profile);
+  const s = await requireSession(ctx.flags.profile);
   const c = await resolveCourse(positional(ctx.args, 0, "course"));
   const user = await getUser(s.token, s.user.userId);
   const live = ctx.args.yes === true && !ctx.flags.dryRun;
@@ -2892,7 +3074,7 @@ async function cefeCourseEnroll(ctx) {
   }
 }
 async function cefeClassBook(ctx) {
-  const s = requireSession(ctx.flags.profile);
+  const s = await requireSession(ctx.flags.profile);
   const c = await resolveCourse(positional(ctx.args, 0, "course"));
   const date = parseDate(requireStr(ctx.args, "date"));
   const live = ctx.args.yes === true && !ctx.flags.dryRun;
@@ -2933,7 +3115,7 @@ async function cefeClassBook(ctx) {
   }
 }
 async function cefeClassCancel(ctx) {
-  const s = requireSession(ctx.flags.profile);
+  const s = await requireSession(ctx.flags.profile);
   const c = await resolveCourse(positional(ctx.args, 0, "course"));
   const date = parseDate(requireStr(ctx.args, "date"));
   const mine = await classBookings(s.token, s.user.userId, { courseId: c.courseId });
@@ -2955,7 +3137,7 @@ async function cefeClassCancel(ctx) {
   return { data: { courseId: c.courseId, classDateTime: booking.classDateTime, cancelled: true }, human: () => `${ok("✓")} Clase cancelada.` };
 }
 async function cefeTournamentList(ctx) {
-  const s = requireSession(ctx.flags.profile);
+  const s = await requireSession(ctx.flags.profile);
   const list = await listTournaments(s.token, str(ctx.args, "status"));
   return {
     data: list,
@@ -2965,7 +3147,7 @@ async function cefeTournamentList(ctx) {
   };
 }
 async function cefeTournamentGet(ctx) {
-  const s = requireSession(ctx.flags.profile);
+  const s = await requireSession(ctx.flags.profile);
   const id = positional(ctx.args, 0, "tournamentId");
   const [t, comps] = await Promise.all([getTournament(s.token, id), competitions(s.token, id)]);
   return {
@@ -2976,13 +3158,13 @@ async function cefeTournamentGet(ctx) {
   };
 }
 async function cefeTournamentMine(ctx) {
-  const s = requireSession(ctx.flags.profile);
+  const s = await requireSession(ctx.flags.profile);
   const list = await myRegistrations(s.token);
   return { data: list, human: () => list.length === 0 ? "Sin inscripciones a torneos." : list.map((r) => `  • ${JSON.stringify(r).slice(0, 160)}`).join(`
 `) };
 }
 async function cefeTournamentRegister(ctx) {
-  const s = requireSession(ctx.flags.profile);
+  const s = await requireSession(ctx.flags.profile);
   const id = positional(ctx.args, 0, "tournamentId");
   const comp = requireStr(ctx.args, "competition");
   const body = { ...str(ctx.args, "dependent") ? { dependentIdentification: str(ctx.args, "dependent") } : {}, ...str(ctx.args, "sex") ? { sex: str(ctx.args, "sex") } : {}, ...str(ctx.args, "observation") ? { observation: str(ctx.args, "observation") } : {} };
@@ -2999,7 +3181,7 @@ async function cefeTournamentRegister(ctx) {
   }
 }
 async function cefeTournamentUnregister(ctx) {
-  const s = requireSession(ctx.flags.profile);
+  const s = await requireSession(ctx.flags.profile);
   const id = positional(ctx.args, 0, "tournamentId");
   const comp = requireStr(ctx.args, "competition");
   assertWritable();
@@ -3950,17 +4132,21 @@ var package_default = {
 var VERSION = package_default.version;
 async function authLogin(ctx) {
   const profile = ctx.flags.profile;
-  const email = str(ctx.args, "email") ?? process.env.IDRD_EMAIL ?? storedEmail(profile);
+  const email = str(ctx.args, "email") ?? knownEmail(profile);
   if (!email)
     fail("usage/missing-flag", "Falta tu correo.", "Usa --email <correo> (se recuerda para la próxima).");
-  const password = await resolvePassword({ stdin: Boolean(ctx.args.passwordStdin), noInput: ctx.flags.noInput });
-  const session = await login(profile, email, password);
+  const save = ctx.args.save === true;
+  if (save && secretBackend() === "none")
+    fail("usage/bad-flag", "CUPO_SECRETS=none: guardar la contraseña está deshabilitado.", "Quita CUPO_SECRETS o ponlo en keychain|file.");
+  const password = await resolvePassword({ stdin: Boolean(ctx.args.passwordStdin), noInput: ctx.flags.noInput, email });
+  const session = await login(profile, email, password, { save });
   const user = await me(session.accessToken).catch(() => null);
-  const data = { email, expiresAt: session.expiresAt, refreshable: Boolean(session.refreshToken), user };
+  const data = { email, expiresAt: session.expiresAt, refreshable: Boolean(session.refreshToken), passwordSaved: save ? session.savedTo ?? null : null, user };
   return {
     data,
     human: () => `${ok("✓")} Sesión iniciada como ${bold(email)}${user ? ` (${user.name})` : ""}
-  ${muted(`Vence: ${session.expiresAt}`)}`,
+  ${muted(`Vence: ${session.expiresAt}`)}${session.savedTo ? `
+  ${muted(`Contraseña guardada en ${session.savedTo}: no se volverá a pedir.`)}` : ""}`,
     nextSteps: [{ command: "cupo idrd find --date mañana --from 6 --to 9", description: "buscar canchas libres" }]
   };
 }
@@ -3983,11 +4169,12 @@ async function authStatus(ctx) {
   } catch (e) {
     liveCheck = e instanceof Error ? e.message : String(e);
   }
-  const data = { loggedIn: user !== null, email: s.email, expiresAt: s.expiresAt, expired, refreshable: Boolean(s.refreshToken), liveCheck, user };
+  const passwordStored = passwordLocation(s.email);
+  const data = { loggedIn: user !== null, email: s.email, expiresAt: s.expiresAt, expired, refreshable: Boolean(s.refreshToken), passwordStored, liveCheck, user };
   return {
     data,
     human: () => user ? `${ok("●")} Sesión activa: ${bold(s.email)} (${user.name})
-  ${muted(`Vence: ${s.expiresAt}${s.refreshToken ? " · renovable" : ""}`)}` : `${danger("●")} Sesión guardada pero no válida: ${liveCheck}`
+  ${muted(`Vence: ${s.expiresAt}${passwordStored ? ` · contraseña guardada (${passwordStored === "keychain" ? "Llavero" : envFilePath()}): se renueva sola` : " · al vencer pedirá la contraseña (guárdala con `auth login --save`)"}`)}` : `${danger("●")} Sesión guardada pero no válida: ${liveCheck}`
   };
 }
 async function authLogout(ctx) {
@@ -3997,7 +4184,10 @@ async function authLogout(ctx) {
       return;
     });
   logoutLocal(ctx.flags.profile);
-  return { data: { loggedOut: true }, human: () => `${ok("✓")} Sesión cerrada y token local borrado.` };
+  const email = s?.email ?? knownEmail(ctx.flags.profile);
+  const forgotten = ctx.args.forget === true && email ? forgetPassword(email) : null;
+  const forgot = Boolean(forgotten && (forgotten.file || forgotten.keychain));
+  return { data: { loggedOut: true, passwordForgotten: forgot }, human: () => `${ok("✓")} Sesión cerrada y token local borrado.${forgot ? " Contraseña guardada eliminada." : ""}` };
 }
 async function bookingList(ctx) {
   const { token } = await accessToken(ctx.flags.profile);
@@ -4067,6 +4257,12 @@ async function doctor(ctx) {
       return { name: "idrd-sesion", ok: true, detail: `${u.email} · vence ${s.expiresAt}${refreshed ? " · renovada" : ""}` };
     },
     async () => {
+      const email = knownEmail(ctx.flags.profile);
+      const where = passwordLocation(email);
+      const insecure = envFileInsecure();
+      return { name: "credenciales", ok: !insecure, detail: insecure ? `${envFilePath()} es legible por otros usuarios: chmod 600` : where ? `IDRD: contraseña guardada en ${where === "keychain" ? "el Llavero" : envFilePath()} (sesión se renueva sola)` : `IDRD: sin contraseña guardada (almacén: ${secretBackend()}); guárdala con \`cupo idrd auth login --save\`` };
+    },
+    async () => {
       const k = getKillswitchState(appHome());
       return { name: "killswitch", ok: !k.active, detail: k.active ? `ACTIVO desde ${k.activatedAt}: ${k.reason}` : "apagado" };
     }
@@ -4105,7 +4301,8 @@ async function schema() {
       error: "{ok:false, schemaVersion, command, error:{code, message, hint?}}"
     },
     exitCodes: { ok: 0, unknown: 1, usage: 2, auth: 3, notFound: 4, refused: 5, upstream: 6 },
-    env: ["CUPO_HOME", "CUPO_PROFILE", "CUPO_JSON", "IDRD_PASSWORD", "IDRD_EMAIL", "CEFE_PASSWORD", "CEFE_EMAIL", "NO_COLOR"],
+    env: ["CUPO_HOME", "CUPO_PROFILE", "CUPO_JSON", "CUPO_SECRETS", "IDRD_PASSWORD", "IDRD_EMAIL", "CEFE_PASSWORD", "CEFE_EMAIL", "NO_COLOR"],
+    envFile: envFilePath(),
     globalFlags: GLOBAL_FLAGS,
     start: ["cupo providers", "cupo find --sport pool --date sab", "cupo book <id de find>"],
     providers: PROVIDERS.map((p) => ({ id: p.id, name: p.name, web: p.web, covers: p.covers, sports: p.sports, login: p.login })),
@@ -4367,8 +4564,8 @@ async function gymStatus(ctx) {
 async function gymQuote(ctx) {
   const id = courtId(positional(ctx.args, 0, "id"));
   const { token } = await accessToken(ctx.flags.profile);
-  const q = await gymMembershipQuote(token, id);
-  const data = { gymId: id, amount: Number(q.amount ?? 0), validFrom: q.valid_from ?? null, validTo: q.valid_to ?? null, concept: q.concept ?? null, quote: q };
+  const q2 = await gymMembershipQuote(token, id);
+  const data = { gymId: id, amount: Number(q2.amount ?? 0), validFrom: q2.valid_from ?? null, validTo: q2.valid_to ?? null, concept: q2.concept ?? null, quote: q2 };
   return {
     data,
     human: () => [

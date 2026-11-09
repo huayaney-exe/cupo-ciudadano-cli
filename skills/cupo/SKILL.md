@@ -21,7 +21,7 @@ Run `bookCommand` from a `find` result as-is: it already carries the right provi
 
 - **Bookings cannot be cancelled** (the portal has no cancel endpoint). Never run a live `booking create` unless the human explicitly asked for that exact court, date and hour in this conversation. Preview first, show the preview to the human, then execute.
 - **You never pay.** For paid bookings, hand the human the `bankUrl`. Do not open it on their behalf unless asked.
-- Never ask the human to paste their password into chat. Login uses `IDRD_PASSWORD` from their environment, `--password-stdin`, or the interactive no-echo prompt in their own terminal.
+- Never ask the human to paste their password into chat. Login uses `IDRD_PASSWORD` from their environment, `--password-stdin`, a password saved with `auth login --save` (macOS Keychain or `~/.cupo/env`, 0600), or the interactive no-echo prompt in their own terminal. Sessions last 8 h (IDRD) / 12 h (CEFE) and the IDRD portal revokes refresh tokens: with a saved password the CLI logs in again by itself, so ask the human to run `cupo idrd auth login --save` once instead of logging in every session.
 
 ## Output contract
 
@@ -46,7 +46,7 @@ Space kinds (`--sport`): `tennis` `padel` `pickleball` `synthetic` `natural` `po
 | `cupo cupo idrd court list [--sport] [--locality] [--all]` | `data[] = {id, parkName, locality, address, sport, bookable, …}` — all pages |
 | `cupo cupo idrd court get <id>` | `kind`, park hours, surface, rules; `lanes[]` for pools, `sports[]` for coliseums |
 | `cupo cupo idrd court lanes <poolId>` / `cupo cupo idrd court sports <coliseumId>` | `[{id, name, level, direction, quota}]` / `[{id, name}]` |
-| `cupo cupo idrd auth login --email <e>` / `auth status` / `auth logout` | session state; status makes a live call |
+| `cupo idrd auth login --email <e> [--save]` / `auth status` / `auth logout [--forget]` | session state; status makes a live call |
 | `cupo cupo idrd booking create <id> --date <d> [--hour <h>] [--hours n] [--lane N] [--sport-id N] [--document D] [--adult-document-type T --adult-document N --adult-name "X"] [--bank <code>]` | **preview** `{dryRun:true, ready, intent, checks[]}` |
 | `… --yes --confirm <intent>` | **live** `{booking:{bookingId, amount, free, lane, sportId, …}, payment}` |
 | `cupo cupo idrd pay banks` · `cupo cupo idrd pay pse <bookingId> --bank <code> --yes [--open]` · `cupo cupo idrd pay status <code>` | banks · `{bankUrl, paymentCode}` · gateway status |
@@ -90,7 +90,7 @@ cupo idrd booking create 11537 --date 2026-11-06 --hour 16 --yes --confirm 11537
 - One-shot when the human already named the bank: add `--bank <code>` to the live `booking create`.
 
 **Errors to handle**
-- `auth/required`, `auth/expired` (exit 3) → ask the human to run `cupo cupo idrd auth login` in their terminal.
+- `auth/required`, `auth/expired` (exit 3) → ask the human to run `cupo idrd auth login --save` in their terminal (once; afterwards the session renews itself). `auth status` reports `passwordStored`.
 - `rule/violation` (exit 2) → explain the rule (max 2 h/day, 4 h/week, 24 h advance, only the published week, Mondays open at 9 am).
 - `slot/unavailable` (exit 5) → re-run `cupo cupo idrd slot list` and offer alternatives.
 - `approval/confirm-mismatch` → the intent changed; re-run the preview and use its new intent.
@@ -114,7 +114,7 @@ Show the human the consents listed in the preview before confirming. Enrolments 
 
 ## CEFE Chapinero (`cupo cefe …`)
 
-Different platform and account (cefechapinero.com). Password from `CEFE_PASSWORD`, `--password-stdin` or the TTY prompt; session in `~/.cupo/cefe/`. No refresh: `auth/expired` → ask the human to run `cupo cefe auth login`.
+Different platform and account (cefechapinero.com). Password from `CEFE_PASSWORD`, `--password-stdin`, a saved one (`auth login --save`) or the TTY prompt; session in `~/.cupo/cefe/`. No refresh endpoint: with a saved password the CLI logs in again by itself; otherwise `auth/expired` → ask the human to run `cupo cefe auth login`.
 
 | Command | What it returns |
 |---|---|

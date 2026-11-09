@@ -86,6 +86,22 @@ cupo find --sport pool --provider idrd                 # solo el IDRD
 
 ## Reservar
 
+### Iniciar sesión una sola vez
+
+```bash
+cupo idrd auth login --email tu@correo.com --save
+cupo cefe auth login --email tu@correo.com --save
+```
+
+La sesión del IDRD dura 8 horas y la del CEFE 12. El portal del IDRD revoca sus propios refresh tokens, así que sin más, cada 8 horas tocaría volver a escribir la contraseña. Con `--save` la contraseña queda guardada **fuera del repo y fuera de texto plano**: en el Llavero de macOS (`security`), o en `~/.cupo/env` con permisos 0600 en Linux. Desde ese momento, cuando una sesión vence, el CLI vuelve a entrar solo, también cuando lo opera un agente sin terminal. Nunca se guarda nada si no pasas `--save`, y solo se guarda después de que el portal aceptó la contraseña.
+
+- `cupo idrd auth status` dice si hay contraseña guardada y dónde; `cupo doctor` también.
+- `cupo idrd auth logout --forget` borra la contraseña guardada (igual con `cefe`).
+- Si prefieres el archivo también en macOS: `CUPO_SECRETS=file`. Para prohibir guardar: `CUPO_SECRETS=none`.
+- También puedes escribir el archivo a mano. El CLI lee `~/.cupo/env` (`IDRD_EMAIL`, `IDRD_PASSWORD`, `CEFE_EMAIL`, `CEFE_PASSWORD`) como si fueran variables de entorno. `chmod 600 ~/.cupo/env`; `doctor` avisa si otros usuarios pueden leerlo.
+
+### Reservar y pagar
+
 ```bash
 cupo book idrd:11537 --date vie --hour 16                    # vista previa: checks en vivo, nada se reserva
 cupo book idrd:11537 --date vie --hour 16 --yes --confirm 11537@2026-11-06T16x1   # IDRD: irreversible, exige el intent
@@ -97,7 +113,7 @@ La vista previa corre contra el sistema real: disponibilidad en ese momento, reg
 
 | | IDRD | CEFE Chapinero |
 |---|---|---|
-| Sesión | `cupo idrd auth login` (`IDRD_PASSWORD`) | `cupo cefe auth login` (`CEFE_PASSWORD`) |
+| Sesión | `cupo idrd auth login --save` (o `IDRD_PASSWORD`); 8 h, se renueva sola con la contraseña guardada | `cupo cefe auth login --save` (o `CEFE_PASSWORD`); 12 h, igual |
 | Unidad | horas en punto; piscinas por carril (`--lane`); coliseos por deporte (`--sport-id`); asadores por bloque | franjas de 60 min publicadas por la piscina (`--time 07:15`) |
 | Reglas | máx. 2 h, 24 h de anticipación, semana publicada | una reserva por día, perfil completo (teléfono, estrato, nacimiento) |
 | Cancelar | **no existe**: por eso exige `--yes --confirm <intent>` | hasta 6 h antes: `cupo cefe booking cancel <id> --yes` |
@@ -153,7 +169,8 @@ Empieza por `cupo schema`: trae `start` (los tres comandos del job), `providers`
   - error: `{ok: false, error: {code, message, hint}}`
 - `nextSteps` siempre son comandos reales y ejecutables; en `cupo find`, cada resultado trae su `bookCommand`.
 - Códigos de salida: `0` ok · `2` uso o regla · `3` falta sesión · `4` no existe · `5` rechazado (falta confirmación, killswitch, sin cupo) · `6` proveedor o red.
-- Nunca se queda esperando: si falta algo, falla con un error estructurado. Contraseñas sin terminal: `IDRD_PASSWORD`, `CEFE_PASSWORD` o `--password-stdin`.
+- Nunca se queda esperando: si falta algo, falla con un error estructurado. Contraseñas sin terminal: `IDRD_PASSWORD`, `CEFE_PASSWORD`, `--password-stdin`, o la guardada con `auth login --save`.
+- Ante `auth/required` o `auth/expired` (salida 3), pídele a la persona que corra una vez `cupo idrd auth login --save` en su terminal. Después de eso la sesión se renueva sola y el agente no vuelve a toparse con ese error. Nunca pidas la contraseña por chat.
 - El flujo completo (iniciar sesión, buscar, reservar, generar el pago y verificarlo) ya lo ejecutó un agente en vivo contra el IDRD; la persona solo eligió el banco y aprobó el pago. La secuencia está en [Una reserva paga, de punta a punta](#una-reserva-paga-de-punta-a-punta).
 - Manual para agentes: [`skills/cupo/SKILL.md`](skills/cupo/SKILL.md). Instálalo con `npx skills add huayaney-exe/cupo-ciudadano-cli`.
 
@@ -170,6 +187,9 @@ Tenías instalada la versión anterior, que se llamaba `idrd`. Reemplázala: `np
 
 **`auth/invalid-credentials` en `cupo cefe auth login`.**
 El correo o la contraseña no coinciden con tu cuenta del CEFE Chapinero, que es distinta a la del IDRD. Pruébalos en [cefechapinero.com/login](https://cefechapinero.com/login).
+
+**Me pide la contraseña cada vez.**
+La sesión del IDRD dura 8 horas y el portal no deja renovarla con el refresh token. Guarda la contraseña una vez con `cupo idrd auth login --save` (Llavero de macOS o `~/.cupo/env`); desde ahí el CLI vuelve a entrar solo. `cupo idrd auth status` muestra si quedó guardada.
 
 **`node: command not found` o una versión menor a 20.**
 Instala Node 20 o superior desde [nodejs.org](https://nodejs.org), o con `brew install node`.
@@ -199,13 +219,14 @@ Todo queda en tu equipo, en `~/.cupo/` (puedes cambiar la ubicación con `CUPO_H
 | Archivo | Contenido |
 |---|---|
 | `config.json` | Solo tu correo, para no pedirlo cada vez |
+| `env` | Solo si lo creas tú o pides `auth login --save` en Linux: `IDRD_PASSWORD`, `CEFE_PASSWORD` y correos, permisos 0600. En macOS `--save` usa el Llavero del sistema, no este archivo |
 | `sessions/<perfil>/current.json` | Token de sesión, permisos 0600 |
 | `web-client.json` | Configuración pública de login del portal, en caché por 7 días |
 | `bookings/<perfil>/` | Reservas creadas desde este equipo, permisos 0600 |
 | `audit/AAAA-MM-DD.jsonl` | Registro de reservas y pagos, sin tokens |
 | `KILLSWITCH` | Si existe, toda escritura queda bloqueada |
 
-Tu contraseña **nunca** se guarda en disco. El CLI no envía datos a ningún servicio distinto del portal del IDRD, salvo una consulta a `api.ipify.org` para obtener tu IP pública, que la pasarela PSE exige al generar un pago.
+Tu contraseña **solo** se guarda si pasas `--save`, y entonces va al Llavero de macOS o a `~/.cupo/env` con permisos 0600; `auth logout --forget` la borra. El CLI no envía datos a ningún servicio distinto del portal del IDRD, salvo una consulta a `api.ipify.org` para obtener tu IP pública, que la pasarela PSE exige al generar un pago.
 
 ## Estado del proyecto
 
@@ -222,6 +243,7 @@ Qué está verificado contra los sistemas reales y qué no.
 | Mensualidad de gimnasio (estado, cotización, compra, activación) | 🟡 Desde el código del portal, cubierto por pruebas con un simulador, sin ejecutar en vivo |
 | Inscripción y retiro de actividades, perfiles | 🟡 Igual: desde el código del portal, sin ejecutar en vivo |
 | Tope de 4 horas por semana | ℹ️ Lo valida el portal, no el CLI |
+| Renovar la sesión del IDRD con el refresh token | ❌ Probado en vivo el 9-nov-2026: el portal responde "Token has been revoked". Por eso existe `auth login --save`, que vuelve a entrar con la contraseña guardada |
 | CEFE Chapinero: piscinas, cupos, cursos, clases disponibles, promociones | ✅ Verificado contra cefechapinero.com |
 | CEFE Chapinero: sesión, reservas, inscripciones, clases, torneos | 🟡 Desde el código de la web, sin ejecutar en vivo |
 | Pago por Daviplata, calendario de recreación, programas sociales, pago Wompi desde el CLI | ❌ Fuera de alcance |

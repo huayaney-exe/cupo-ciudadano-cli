@@ -7,7 +7,8 @@ import { AppError, fail } from "../core/errors.js";
 import { appHome, paths, profileName } from "../core/paths.js";
 import { table } from "../core/table.js";
 import * as api from "../cefe/api.js";
-import { currentSession, login, logoutLocal, persistSession, requireSession, resolvePassword, storedEmail } from "../cefe/auth.js";
+import { currentSession, forgetPassword, knownEmail, login, logoutLocal, passwordLocation, persistSession, requireSession, resolvePassword, storedEmail } from "../cefe/auth.js";
+import { envFilePath, secretBackend } from "../core/secrets.js";
 import { canCancel, daySlots, priceEstimate, SLOT_MINUTES, spaGateClosed, type DaySlot } from "../cefe/schedule.js";
 import { addDays, bogotaNow, nowMs, parseDate } from "../idrd/time.js";
 import type { Ctx } from "./context.js";
@@ -46,13 +47,15 @@ async function resolvePool(raw: string): Promise<api.Pool> {
 // ---------------------------------------------------------------- auth
 
 export async function cefeLogin(ctx: Ctx) {
-  const email = str(ctx.args, "email") ?? process.env.CEFE_EMAIL ?? storedEmail(ctx.flags.profile);
+  const email = str(ctx.args, "email") ?? knownEmail(ctx.flags.profile);
   if (!email) fail("usage/missing-flag", "Falta tu correo.", "Usa --email <correo> (se recuerda para la próxima).");
-  const password = await resolvePassword({ stdin: Boolean(ctx.args.passwordStdin), noInput: ctx.flags.noInput });
-  const s = await login(ctx.flags.profile, email, password);
+  const save = ctx.args.save === true;
+  if (save && secretBackend() === "none") fail("usage/bad-flag", "CUPO_SECRETS=none: guardar la contraseña está deshabilitado.", "Quita CUPO_SECRETS o ponlo en keychain|file.");
+  const password = await resolvePassword({ stdin: Boolean(ctx.args.passwordStdin), noInput: ctx.flags.noInput, email });
+  const s = await login(ctx.flags.profile, email, password, { save });
   const missing = profileGaps(s.user);
   return {
-    data: { email, expiresAt: s.expiresAt, user: { ...s.user, raw: undefined }, missingForBooking: missing },
+    data: { email, expiresAt: s.expiresAt, passwordSaved: save ? s.savedTo ?? null : null, user: { ...s.user, raw: undefined }, missingForBooking: missing },
     human: () => `${ok("✓")} Sesión CEFE Chapinero iniciada como ${bold(email)} (${s.user.name})\n  ${muted(`Créditos: ${s.user.credits} · Reservas disponibles: ${s.user.reservasDisponibles} · Dependientes: ${s.user.dependents.length}`)}${missing.length ? `\n  ${warn("!")} Para reservar falta en tu perfil: ${missing.join(", ")} (cefechapinero.com/client/profile)` : ""}`,
     nextSteps: [{ command: "cupo cefe find --date mañana", description: "cupos libres en las piscinas" }],
   };
@@ -78,14 +81,17 @@ export async function cefeStatus(ctx: Ctx) {
     liveCheck = e instanceof Error ? e.message : String(e);
   }
   return {
-    data: { loggedIn: user !== null, email: s.email, expiresAt: s.expiresAt, liveCheck, user: user ? { ...user, raw: undefined } : null },
+    data: { loggedIn: user !== null, email: s.email, expiresAt: s.expiresAt, passwordStored: passwordLocation(s.email), liveCheck, user: user ? { ...user, raw: undefined } : null },
     human: () => (user ? `${ok("●")} Sesión CEFE activa: ${bold(s.email)} (${user.name})\n  ${muted(`Vence: ${s.expiresAt} · créditos ${user.credits} · reservas disponibles ${user.reservasDisponibles}`)}` : `${danger("●")} Sesión guardada pero no válida: ${liveCheck}`),
   };
 }
 
 export async function cefeLogout(ctx: Ctx) {
+  const email = currentSession(ctx.flags.profile)?.email ?? knownEmail(ctx.flags.profile);
   logoutLocal(ctx.flags.profile);
-  return { data: { loggedOut: true }, human: () => `${ok("✓")} Sesión CEFE cerrada (token local borrado; el servidor no tiene logout).` };
+  const forgotten = ctx.args.forget === true && email ? forgetPassword(email) : null;
+  const forgot = Boolean(forgotten && (forgotten.file || forgotten.keychain));
+  return { data: { loggedOut: true, passwordForgotten: forgot }, human: () => `${ok("✓")} Sesión CEFE cerrada (token local borrado; el servidor no tiene logout).${forgot ? " Contraseña guardada eliminada." : ""}` };
 }
 
 export async function cefeRegister(ctx: Ctx) {
@@ -108,7 +114,7 @@ export async function cefeRegister(ctx: Ctx) {
 }
 
 export async function cefeMe(ctx: Ctx) {
-  const s = requireSession(ctx.flags.profile);
+  const s = await requireSession(ctx.flags.profile);
   const u = await api.getUser(s.token, s.user.userId);
   persistSession(ctx.flags.profile, s.email, s.token, u);
   const missing = profileGaps(u);
@@ -230,7 +236,7 @@ function parsePay(raw: string | undefined, price: number): PayMethod {
 }
 
 export async function cefeBookingCreate(ctx: Ctx) {
-  const s = requireSession(ctx.flags.profile);
+  const s = await requireSession(ctx.flags.profile);
   const pool = await resolvePool(positional(ctx.args, 0, "pool"));
   const date = parseDate(requireStr(ctx.args, "date"));
   const time = parseTime(str(ctx.args, "time") ?? str(ctx.args, "hour"));
@@ -304,7 +310,7 @@ export async function cefeBookingCreate(ctx: Ctx) {
 }
 
 export async function cefeBookingList(ctx: Ctx) {
-  const s = requireSession(ctx.flags.profile);
+  const s = await requireSession(ctx.flags.profile);
   const from = str(ctx.args, "from") ? parseDate(str(ctx.args, "from")) : undefined;
   const to = str(ctx.args, "to") ? parseDate(str(ctx.args, "to")) : undefined;
   const date = str(ctx.args, "date") ? parseDate(str(ctx.args, "date")) : undefined;
@@ -320,7 +326,7 @@ export async function cefeBookingList(ctx: Ctx) {
 }
 
 export async function cefeBookingCancel(ctx: Ctx) {
-  const s = requireSession(ctx.flags.profile);
+  const s = await requireSession(ctx.flags.profile);
   const id = positional(ctx.args, 0, "reservationId");
   const list = await api.userReservations(s.token, s.user.userId);
   const r = list.find((x) => x.id === id);
@@ -386,7 +392,7 @@ export async function cefeCourseGet(ctx: Ctx) {
 }
 
 export async function cefeCourseMine(ctx: Ctx) {
-  const s = requireSession(ctx.flags.profile);
+  const s = await requireSession(ctx.flags.profile);
   const [mine, classes] = await Promise.all([api.userCourses(s.token, s.user.userId), api.classBookings(s.token, s.user.userId).catch(() => [])]);
   return {
     data: { enrollments: mine, classes },
@@ -406,7 +412,7 @@ function gateCheck(): Check {
 }
 
 export async function cefeCourseEnroll(ctx: Ctx) {
-  const s = requireSession(ctx.flags.profile);
+  const s = await requireSession(ctx.flags.profile);
   const c = await resolveCourse(positional(ctx.args, 0, "course"));
   const user = await api.getUser(s.token, s.user.userId);
   const live = ctx.args.yes === true && !ctx.flags.dryRun;
@@ -451,7 +457,7 @@ export async function cefeCourseEnroll(ctx: Ctx) {
 }
 
 export async function cefeClassBook(ctx: Ctx) {
-  const s = requireSession(ctx.flags.profile);
+  const s = await requireSession(ctx.flags.profile);
   const c = await resolveCourse(positional(ctx.args, 0, "course"));
   const date = parseDate(requireStr(ctx.args, "date"));
   const live = ctx.args.yes === true && !ctx.flags.dryRun;
@@ -490,7 +496,7 @@ export async function cefeClassBook(ctx: Ctx) {
 }
 
 export async function cefeClassCancel(ctx: Ctx) {
-  const s = requireSession(ctx.flags.profile);
+  const s = await requireSession(ctx.flags.profile);
   const c = await resolveCourse(positional(ctx.args, 0, "course"));
   const date = parseDate(requireStr(ctx.args, "date"));
   const mine = await api.classBookings(s.token, s.user.userId, { courseId: c.courseId });
@@ -513,7 +519,7 @@ export async function cefeClassCancel(ctx: Ctx) {
 // ---------------------------------------------------------------- tournaments & promotions
 
 export async function cefeTournamentList(ctx: Ctx) {
-  const s = requireSession(ctx.flags.profile);
+  const s = await requireSession(ctx.flags.profile);
   const list = await api.listTournaments(s.token, str(ctx.args, "status"));
   return {
     data: list,
@@ -523,7 +529,7 @@ export async function cefeTournamentList(ctx: Ctx) {
 }
 
 export async function cefeTournamentGet(ctx: Ctx) {
-  const s = requireSession(ctx.flags.profile);
+  const s = await requireSession(ctx.flags.profile);
   const id = positional(ctx.args, 0, "tournamentId");
   const [t, comps] = await Promise.all([api.getTournament(s.token, id), api.competitions(s.token, id)]);
   return {
@@ -534,13 +540,13 @@ export async function cefeTournamentGet(ctx: Ctx) {
 }
 
 export async function cefeTournamentMine(ctx: Ctx) {
-  const s = requireSession(ctx.flags.profile);
+  const s = await requireSession(ctx.flags.profile);
   const list = await api.myRegistrations(s.token);
   return { data: list, human: () => (list.length === 0 ? "Sin inscripciones a torneos." : list.map((r) => `  • ${JSON.stringify(r).slice(0, 160)}`).join("\n")) };
 }
 
 export async function cefeTournamentRegister(ctx: Ctx) {
-  const s = requireSession(ctx.flags.profile);
+  const s = await requireSession(ctx.flags.profile);
   const id = positional(ctx.args, 0, "tournamentId");
   const comp = requireStr(ctx.args, "competition");
   const body = { ...(str(ctx.args, "dependent") ? { dependentIdentification: str(ctx.args, "dependent") } : {}), ...(str(ctx.args, "sex") ? { sex: str(ctx.args, "sex") } : {}), ...(str(ctx.args, "observation") ? { observation: str(ctx.args, "observation") } : {}) };
@@ -558,7 +564,7 @@ export async function cefeTournamentRegister(ctx: Ctx) {
 }
 
 export async function cefeTournamentUnregister(ctx: Ctx) {
-  const s = requireSession(ctx.flags.profile);
+  const s = await requireSession(ctx.flags.profile);
   const id = positional(ctx.args, 0, "tournamentId");
   const comp = requireStr(ctx.args, "competition");
   assertWritable();

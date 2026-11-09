@@ -350,6 +350,8 @@ export async function run(argv: string[], env: Record<string, string | undefined
 export function tempHome(): { dir: string; cleanup: () => void } {
   const dir = mkdtempSync(join(tmpdir(), "idrd-test-"));
   process.env.IDRD_HOME = dir;
+  // Never touch the developer's real Keychain from the suite.
+  process.env.CUPO_SECRETS = "file";
   return { dir, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
 }
 

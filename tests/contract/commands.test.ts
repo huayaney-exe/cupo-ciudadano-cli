@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { readFileSync, statSync } from "node:fs";
+import { readFileSync, statSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { allFiles, mockPortal, readAudit, run, tempHome } from "./harness.ts";
 
 let home: ReturnType<typeof tempHome>;
@@ -86,6 +87,37 @@ describe("auth", () => {
     const session = files.find((f) => f.endsWith("current.json"))!;
     expect(statSync(session).mode & 0o777).toBe(0o600);
     expect(readFileSync(files.find((f) => f.endsWith("config.json"))!, "utf8")).toContain("a@b.co");
+  });
+  test("--save keeps the password in ~/.cupo/env (0600) and logs in again by itself when the session expires", async () => {
+    mockPortal();
+    const r = await run(["idrd", "auth", "login", "--email", "a@b.co", "--save", "--json"], { IDRD_PASSWORD: PASSWORD });
+    expect(r.code).toBe(0);
+    expect(r.json.data.passwordSaved).toContain("env");
+    const envFile = join(home.dir, "env");
+    expect(readFileSync(envFile, "utf8")).toBe(`IDRD_PASSWORD=${PASSWORD}\n`);
+    expect(statSync(envFile).mode & 0o777).toBe(0o600);
+    // Expire the session with no refresh token: only a saved password can bring it back.
+    const sessionFile = allFiles(home.dir).find((f) => f.endsWith("sessions/default/current.json"))!;
+    const s = JSON.parse(readFileSync(sessionFile, "utf8"));
+    writeFileSync(sessionFile, JSON.stringify({ ...s, expiresAt: "2020-01-01T00:00:00.000Z", refreshToken: undefined }));
+    const calls = mockPortal();
+    const st = await run(["idrd", "auth", "status", "--json"], { IDRD_PASSWORD: undefined });
+    expect(st.json.data).toMatchObject({ loggedIn: true, passwordStored: "file" });
+    expect(calls.filter((c) => c.url === "/oauth/token").map((c) => (c.body as any).grant_type)).toEqual(["password"]);
+    expect(JSON.parse(readFileSync(sessionFile, "utf8")).expiresAt > "2026").toBe(true);
+    // Without --save nothing is ever written, and --forget removes what --save wrote.
+    const out = await run(["idrd", "auth", "logout", "--forget", "--json"], { IDRD_PASSWORD: undefined });
+    expect(out.json.data).toMatchObject({ loggedOut: true, passwordForgotten: true });
+    expect(readFileSync(envFile, "utf8")).not.toContain(PASSWORD);
+    const again = await run(["idrd", "auth", "status", "--json"], { IDRD_PASSWORD: undefined });
+    expect(again.json.data.loggedIn).toBe(false);
+  });
+  test("a hand-written ~/.cupo/env is honoured like the environment", async () => {
+    mockPortal();
+    writeFileSync(join(home.dir, "env"), `IDRD_EMAIL=a@b.co\nIDRD_PASSWORD="${PASSWORD}"\n`, { mode: 0o600 });
+    const r = await run(["idrd", "booking", "list", "--json", "--no-input"], { IDRD_PASSWORD: undefined });
+    expect(r.code).toBe(0);
+    expect(r.json.data.remote).toEqual([]);
   });
   test("login without TTY and without IDRD_PASSWORD fails fast instead of prompting", async () => {
     mockPortal();

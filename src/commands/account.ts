@@ -6,7 +6,8 @@ import { EXIT, fail } from "../core/errors.js";
 import { appHome } from "../core/paths.js";
 import { SCHEMA_VERSION } from "../core/output.js";
 import { listBookings, listCourts, logout, me, paymentHistory, pendingToPay } from "../idrd/api.js";
-import { accessToken, currentSession, login, logoutLocal, resolvePassword, storedEmail } from "../idrd/auth.js";
+import { accessToken, currentSession, forgetPassword, knownEmail, login, logoutLocal, passwordLocation, resolvePassword, storedEmail } from "../idrd/auth.js";
+import { envFileInsecure, envFilePath, secretBackend } from "../core/secrets.js";
 import { localBookings } from "../idrd/payment.js";
 import { COMMANDS, GLOBAL_FLAGS, providerOf } from "../registry.js";
 import { PROVIDERS } from "./jobs.js";
@@ -20,15 +21,17 @@ export const VERSION: string = pkg.version;
 
 export async function authLogin(ctx: Ctx) {
   const profile = ctx.flags.profile;
-  const email = str(ctx.args, "email") ?? process.env.IDRD_EMAIL ?? storedEmail(profile);
+  const email = str(ctx.args, "email") ?? knownEmail(profile);
   if (!email) fail("usage/missing-flag", "Falta tu correo.", "Usa --email <correo> (se recuerda para la próxima).");
-  const password = await resolvePassword({ stdin: Boolean(ctx.args.passwordStdin), noInput: ctx.flags.noInput });
-  const session = await login(profile, email, password);
+  const save = ctx.args.save === true;
+  if (save && secretBackend() === "none") fail("usage/bad-flag", "CUPO_SECRETS=none: guardar la contraseña está deshabilitado.", "Quita CUPO_SECRETS o ponlo en keychain|file.");
+  const password = await resolvePassword({ stdin: Boolean(ctx.args.passwordStdin), noInput: ctx.flags.noInput, email });
+  const session = await login(profile, email, password, { save });
   const user = await me(session.accessToken).catch(() => null);
-  const data = { email, expiresAt: session.expiresAt, refreshable: Boolean(session.refreshToken), user };
+  const data = { email, expiresAt: session.expiresAt, refreshable: Boolean(session.refreshToken), passwordSaved: save ? session.savedTo ?? null : null, user };
   return {
     data,
-    human: () => `${ok("✓")} Sesión iniciada como ${bold(email)}${user ? ` (${user.name})` : ""}\n  ${muted(`Vence: ${session.expiresAt}`)}`,
+    human: () => `${ok("✓")} Sesión iniciada como ${bold(email)}${user ? ` (${user.name})` : ""}\n  ${muted(`Vence: ${session.expiresAt}`)}${session.savedTo ? `\n  ${muted(`Contraseña guardada en ${session.savedTo}: no se volverá a pedir.`)}` : ""}`,
     nextSteps: [{ command: "cupo idrd find --date mañana --from 6 --to 9", description: "buscar canchas libres" }],
   };
 }
@@ -52,12 +55,13 @@ export async function authStatus(ctx: Ctx) {
   } catch (e) {
     liveCheck = e instanceof Error ? e.message : String(e);
   }
-  const data = { loggedIn: user !== null, email: s.email, expiresAt: s.expiresAt, expired, refreshable: Boolean(s.refreshToken), liveCheck, user };
+  const passwordStored = passwordLocation(s.email);
+  const data = { loggedIn: user !== null, email: s.email, expiresAt: s.expiresAt, expired, refreshable: Boolean(s.refreshToken), passwordStored, liveCheck, user };
   return {
     data,
     human: () =>
       user
-        ? `${ok("●")} Sesión activa: ${bold(s.email)} (${user.name})\n  ${muted(`Vence: ${s.expiresAt}${s.refreshToken ? " · renovable" : ""}`)}`
+        ? `${ok("●")} Sesión activa: ${bold(s.email)} (${user.name})\n  ${muted(`Vence: ${s.expiresAt}${passwordStored ? ` · contraseña guardada (${passwordStored === "keychain" ? "Llavero" : envFilePath()}): se renueva sola` : " · al vencer pedirá la contraseña (guárdala con `auth login --save`)"}`)}`
         : `${danger("●")} Sesión guardada pero no válida: ${liveCheck}`,
   };
 }
@@ -66,7 +70,10 @@ export async function authLogout(ctx: Ctx) {
   const s = currentSession(ctx.flags.profile);
   if (s) await logout(s.accessToken).catch(() => undefined);
   logoutLocal(ctx.flags.profile);
-  return { data: { loggedOut: true }, human: () => `${ok("✓")} Sesión cerrada y token local borrado.` };
+  const email = s?.email ?? knownEmail(ctx.flags.profile);
+  const forgotten = ctx.args.forget === true && email ? forgetPassword(email) : null;
+  const forgot = Boolean(forgotten && (forgotten.file || forgotten.keychain));
+  return { data: { loggedOut: true, passwordForgotten: forgot }, human: () => `${ok("✓")} Sesión cerrada y token local borrado.${forgot ? " Contraseña guardada eliminada." : ""}` };
 }
 
 export async function bookingList(ctx: Ctx) {
@@ -135,6 +142,12 @@ export async function doctor(ctx: Ctx) {
       return { name: "idrd-sesion", ok: true, detail: `${u.email} · vence ${s.expiresAt}${refreshed ? " · renovada" : ""}` };
     },
     async () => {
+      const email = knownEmail(ctx.flags.profile);
+      const where = passwordLocation(email);
+      const insecure = envFileInsecure();
+      return { name: "credenciales", ok: !insecure, detail: insecure ? `${envFilePath()} es legible por otros usuarios: chmod 600` : where ? `IDRD: contraseña guardada en ${where === "keychain" ? "el Llavero" : envFilePath()} (sesión se renueva sola)` : `IDRD: sin contraseña guardada (almacén: ${secretBackend()}); guárdala con \`cupo idrd auth login --save\`` };
+    },
+    async () => {
       const k = getKillswitchState(appHome());
       return { name: "killswitch", ok: !k.active, detail: k.active ? `ACTIVO desde ${k.activatedAt}: ${k.reason}` : "apagado" };
     },
@@ -170,7 +183,9 @@ export async function schema() {
       error: "{ok:false, schemaVersion, command, error:{code, message, hint?}}",
     },
     exitCodes: { ok: 0, unknown: 1, usage: 2, auth: 3, notFound: 4, refused: 5, upstream: 6 },
-    env: ["CUPO_HOME", "CUPO_PROFILE", "CUPO_JSON", "IDRD_PASSWORD", "IDRD_EMAIL", "CEFE_PASSWORD", "CEFE_EMAIL", "NO_COLOR"],
+    env: ["CUPO_HOME", "CUPO_PROFILE", "CUPO_JSON", "CUPO_SECRETS", "IDRD_PASSWORD", "IDRD_EMAIL", "CEFE_PASSWORD", "CEFE_EMAIL", "NO_COLOR"],
+    /** `~/.cupo/env` (0600) is read for every variable above; `auth login --save` stores the password in the macOS Keychain or there. */
+    envFile: envFilePath(),
     globalFlags: GLOBAL_FLAGS,
     /** Start here: the job, then the map, then the provider detail. */
     start: ["cupo providers", "cupo find --sport pool --date sab", "cupo book <id de find>"],
