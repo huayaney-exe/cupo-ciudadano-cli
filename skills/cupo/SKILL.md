@@ -37,28 +37,28 @@ Runtime contract: `cupo schema`. Per-command help: `idrd <cmd> --help --json`.
 
 ## Commands
 
-Space kinds (`--sport`): `tennis` `padel` `pickleball` `synthetic` `natural` `pool` `grill` `gym` `coliseum` (Spanish aliases work: `piscina`, `asador`, `gimnasio`, `coliseo`). `cupo cupo idrd space …` is an alias of `cupo cupo idrd court …`.
+Space kinds (`--sport`): `tennis` `padel` `pickleball` `synthetic` `natural` `pool` `grill` `gym` `coliseum` (Spanish aliases work: `piscina`, `asador`, `gimnasio`, `coliseo`). `cupo idrd space …` is an alias of `cupo idrd court …`.
 
 | Command | What it returns |
 |---|---|
-| `cupo cupo idrd find --date <d> [--sport <kind>] [--from H] [--to H] [--locality X] [--sport-id N]` | `data.results[] = {court, lane?, freeHours[], places?}` across every bookable space of that kind; pools are scanned lane by lane |
-| `cupo cupo idrd slot list <id> --date <d> [--free] [--lane N] [--sport-id N] [--document D]` | `data.kind`, `slots[] = {hour, available, quota?, used?}`, `blocks[] = {from, to, available}`, `freeRuns`, `weekDates` |
-| `cupo cupo idrd court list [--sport] [--locality] [--all]` | `data[] = {id, parkName, locality, address, sport, bookable, …}` — all pages |
-| `cupo cupo idrd court get <id>` | `kind`, park hours, surface, rules; `lanes[]` for pools, `sports[]` for coliseums |
-| `cupo cupo idrd court lanes <poolId>` / `cupo cupo idrd court sports <coliseumId>` | `[{id, name, level, direction, quota}]` / `[{id, name}]` |
+| `cupo idrd find --date <d> [--sport <kind>] [--from H] [--to H] [--locality X] [--sport-id N]` | `data.results[] = {court, lane?, freeHours[], places?}` across every bookable space of that kind; pools are scanned lane by lane |
+| `cupo idrd slot list <id> --date <d> [--free] [--lane N] [--sport-id N] [--document D]` | `data.kind`, `slots[] = {hour, available, quota?, used?}`, `blocks[] = {from, to, available}`, `freeRuns`, `weekDates` |
+| `cupo idrd court list [--sport] [--locality] [--all]` | `data[] = {id, parkName, locality, address, sport, bookable, …}` — all pages |
+| `cupo idrd court get <id>` | `kind`, park hours, surface, rules; `lanes[]` for pools, `sports[]` for coliseums |
+| `cupo idrd court lanes <poolId>` / `cupo idrd court sports <coliseumId>` | `[{id, name, level, direction, quota}]` / `[{id, name}]` |
 | `cupo idrd auth login --email <e> [--save]` / `auth status` / `auth logout [--forget]` | session state; status makes a live call |
-| `cupo cupo idrd booking create <id> --date <d> [--hour <h>] [--hours n] [--lane N] [--sport-id N] [--document D] [--adult-document-type T --adult-document N --adult-name "X"] [--bank <code>]` | **preview** `{dryRun:true, ready, intent, checks[]}` |
+| `cupo idrd booking create <id> --date <d> [--hour <h>] [--hours n] [--lane N] [--sport-id N] [--document D] [--adult-document-type T --adult-document N --adult-name "X"] [--bank <code>]` | **preview** `{dryRun:true, ready, intent, checks[]}` |
 | `… --yes --confirm <intent>` | **live** `{booking:{bookingId, amount, free, lane, sportId, …}, payment}` |
-| `cupo cupo idrd pay banks` · `cupo cupo idrd pay pse <bookingId> --bank <code> --yes [--open]` · `cupo cupo idrd pay status <code>` | banks · `{bankUrl, paymentCode}` · gateway status |
-| `cupo cupo idrd pay pending` · `cupo cupo idrd pay history` · `cupo cupo idrd booking list` | account payments and bookings (auth) |
-| `cupo cupo idrd gym status <gymId>` · `gym quote <gymId>` · `gym availability <gymId>` · `gym active` | membership state, price and validity, places per day (auth) |
-| `cupo cupo idrd gym buy <gymId> --bank <code>` → `… --yes --confirm gym<id>@membership` | **preview** / **live** `{membershipId, payment{bankUrl, paymentCode}}` |
-| `cupo cupo idrd gym activate <gymId> --code <paymentCode> --yes` | activates the membership after PSE approves |
-| `cupo cupo idrd activity list [--program ids] [--stage ids] [--text X] [--locality X] [--age N] [--free\|--paid] [--available]` | `data[] = {id, program, name, stage, weekdays, hours, minAge, maxAge, quota, left, paid, open, consent[]}` — all pages |
-| `cupo cupo idrd activity get <id>` · `activity programs` · `activity stages` · `activity categories` | detail · programs with counts · stages (the CEFE are stages) · sport categories |
-| `cupo cupo idrd profile list` · `cupo cupo idrd activity mine` | account profiles (holder + beneficiaries) · current enrolments (auth) |
-| `cupo cupo idrd activity subscribe <activityId> --person <profileId>` → `… --yes --confirm activity<a>@profile<p>` | **preview** `{ready, checks[], consent[]}` / **live** `{subscriptionId}` |
-| `cupo cupo idrd activity unsubscribe <subscriptionId> --yes` | removes an enrolment |
+| `cupo idrd pay banks` · `cupo idrd pay pse <bookingId> --bank <code> --yes [--open]` · `cupo idrd pay status <code>` | banks · `{bankUrl, paymentCode}` · gateway status |
+| `cupo idrd pay pending` · `cupo idrd pay history` · `cupo idrd booking list` | account payments and bookings (auth) |
+| `cupo idrd gym status <gymId>` · `gym quote <gymId>` · `gym availability <gymId>` · `gym active` | membership state, price and validity, places per day (auth) |
+| `cupo idrd gym buy <gymId> --bank <code>` → `… --yes --confirm gym<id>@membership` | **preview** / **live** `{membershipId, payment{bankUrl, paymentCode}}` |
+| `cupo idrd gym activate <gymId> --code <paymentCode> --yes` | activates the membership after PSE approves |
+| `cupo idrd activity list [--program ids] [--stage ids] [--text X] [--locality X] [--age N] [--free\|--paid] [--available]` | `data[] = {id, program, name, stage, weekdays, hours, minAge, maxAge, quota, left, paid, open, consent[]}` — all pages |
+| `cupo idrd activity get <id>` · `activity programs` · `activity stages` · `activity categories` | detail · programs with counts · stages (the CEFE are stages) · sport categories |
+| `cupo idrd profile list` · `cupo idrd activity mine` | account profiles (holder + beneficiaries) · current enrolments (auth) |
+| `cupo idrd activity subscribe <activityId> --person <profileId>` → `… --yes --confirm activity<a>@profile<p>` | **preview** `{ready, checks[], consent[]}` / **live** `{subscriptionId}` |
+| `cupo idrd activity unsubscribe <subscriptionId> --yes` | removes an enrolment |
 | `cupo doctor` · `cupo killswitch on\|off\|status` · `cupo schema` | |
 
 Dates: `YYYY-MM-DD`, `hoy`, `mañana`, or `lun…dom` (next occurrence, today included). Hours: `6`, `6am`, `"6:00 AM"`, `18`, `6pm`. Times are Bogotá local.
@@ -86,13 +86,13 @@ cupo idrd booking create 11537 --date 2026-11-06 --hour 16 --json     # read dat
 cupo idrd booking create 11537 --date 2026-11-06 --hour 16 --yes --confirm 11537@2026-11-06T16x1 --json
 ```
 - `data.booking.free == true` → confirmed; share `data.payment.receiptUrl`.
-- Paid → `cupo cupo idrd pay banks`, ask which bank, then `cupo cupo idrd pay pse <bookingId> --bank <code> --yes --json` and give the human `data.bankUrl`. The portal holds the booking only a few minutes for payment.
+- Paid → `cupo idrd pay banks`, ask which bank, then `cupo idrd pay pse <bookingId> --bank <code> --yes --json` and give the human `data.bankUrl`. The portal holds the booking only a few minutes for payment.
 - One-shot when the human already named the bank: add `--bank <code>` to the live `booking create`.
 
 **Errors to handle**
 - `auth/required`, `auth/expired` (exit 3) → ask the human to run `cupo idrd auth login --save` in their terminal (once; afterwards the session renews itself). `auth status` reports `passwordStored`.
 - `rule/violation` (exit 2) → explain the rule (max 2 h/day, 4 h/week, 24 h advance, only the published week, Mondays open at 9 am).
-- `slot/unavailable` (exit 5) → re-run `cupo cupo idrd slot list` and offer alternatives.
+- `slot/unavailable` (exit 5) → re-run `cupo idrd slot list` and offer alternatives.
 - `approval/confirm-mismatch` → the intent changed; re-run the preview and use its new intent.
 - `safety/killswitch` → the human disabled writes on purpose; do not turn it off yourself.
 
