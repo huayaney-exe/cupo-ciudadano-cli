@@ -66,6 +66,12 @@ The damage is real and asymmetric: **the portal has no cancel endpoint** (none i
 - **Untrusted text.** Every upstream string goes through `cleanText` (strips ANSI, control and bidi characters, caps length, repairs double-encoded UTF-8) before it reaches an agent.
 - **Real IP only.** PSE requires the payer's public IP. The portal's SPA falls back to a hardcoded IP when lookup fails; this CLI refuses instead of sending an address that is not the user's.
 
+## Phase 2c: the first minute and the thousandth (2026-11-09 audit)
+
+Found by using the CLI as a person would, after the live validation: `cupo find` with no `--to` forwarded an implicit `24`/`24:00` that both providers reject, and the failure was swallowed into `failed[]`, so the headline command returned "Sin cupo" on its defaults (tests always passed a window; now they also run the defaults). `booking list`, `pay history` and `pay pending` printed raw JSON in human mode; they are tables now, and local bookings carry a `status` (`pagada` when the portal lists them, `vencida` when the 15-minute hold passed, `pendiente` with the exact `pay pse` command otherwise). `cupo idrd --help` was an unknown command although the README advertised it; `cupo idrd`/`cupo cefe` now print that provider's commands (JSON: the specs). Unknown commands suggest the closest names by word distance instead of dumping sixty names.
+
+Bare `cupo` is a welcome screen, Gemini-CLI style: gradient wordmark, the three commands of the job, session state, where the full help is. The same screen appears once on the first human command on a machine (marker `~/.cupo/welcomed`; `CUPO_NO_BANNER=1` or `--no-banner` suppress it) because an `npm postinstall` banner is invisible under npm ≥ 7, which hides script output. Update check as update-notifier does it: the command only reads `~/.cupo/update-check.json` and prints one stderr line when it names a newer version; a detached `cupo __update-check` (hidden from help and schema) refreshes it from the published `package.json` at most daily. Never in JSON mode, `--quiet`, CI or with `CUPO_NO_UPDATE_CHECK=1`; latency never waits on the network.
+
 ## Phase 3: cligentic blocks
 
 Registered under `package.json.registries` (no `components.json` created). Installed to `src/cli/{agent,foundation,platform,safety}`.

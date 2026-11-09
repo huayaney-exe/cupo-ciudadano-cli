@@ -1,6 +1,6 @@
 {
   "name": "cupo",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Consigue cupo para hacer deporte en Bogotá desde la terminal: canchas, piscinas, asadores, gimnasios, coliseos y cursos del IDRD y del CEFE Chapinero. CLI agent-first, no oficial.",
   "type": "module",
   "private": true,

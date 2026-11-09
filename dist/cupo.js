@@ -602,32 +602,436 @@ function truncateVisible(text, width) {
   return width <= 1 ? plain.slice(0, width) : `${plain.slice(0, width - 1)}…`;
 }
 
+// src/core/table.ts
+function table(headers, rows, maxWidths = []) {
+  const widths = headers.map((h, i) => {
+    const natural = Math.max(visibleWidth(h), ...rows.map((r) => visibleWidth(r[i] ?? "")));
+    return maxWidths[i] ? Math.min(natural, maxWidths[i]) : natural;
+  });
+  const line = (cells) => cells.map((c, i) => padVisible(truncateVisible(c ?? "", widths[i]), widths[i])).join("  ").trimEnd();
+  return [bold(line(headers)), dim(widths.map((w) => "─".repeat(w)).join("  ")), ...rows.map(line)].join(`
+`);
+}
+
+// src/idrd/time.ts
+var TZ = "America/Bogota";
+var nowImpl = () => new Date;
+function nowMs() {
+  return nowImpl().getTime();
+}
+function bogotaNow() {
+  const parts = Object.fromEntries(new Intl.DateTimeFormat("en-CA", {
+    timeZone: TZ,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23"
+  }).formatToParts(nowImpl()).map((p) => [p.type, p.value]));
+  const date = `${parts.year}-${parts.month}-${parts.day}`;
+  return { date, hour: Number(parts.hour), minute: Number(parts.minute), isoWeekday: isoWeekday(date) };
+}
+function isoWeekday(date) {
+  const d = new Date(`${date}T12:00:00Z`).getUTCDay();
+  return d === 0 ? 7 : d;
+}
+function addDays(date, n) {
+  const d = new Date(`${date}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+var WEEKDAYS = {
+  lun: 1,
+  lunes: 1,
+  mon: 1,
+  monday: 1,
+  mar: 2,
+  martes: 2,
+  tue: 2,
+  tuesday: 2,
+  mie: 3,
+  mié: 3,
+  miercoles: 3,
+  miércoles: 3,
+  wed: 3,
+  wednesday: 3,
+  jue: 4,
+  jueves: 4,
+  thu: 4,
+  thursday: 4,
+  vie: 5,
+  viernes: 5,
+  fri: 5,
+  friday: 5,
+  sab: 6,
+  sáb: 6,
+  sabado: 6,
+  sábado: 6,
+  sat: 6,
+  saturday: 6,
+  dom: 7,
+  domingo: 7,
+  sun: 7,
+  sunday: 7
+};
+function parseDate(input) {
+  const today = bogotaNow().date;
+  if (!input)
+    return today;
+  const s = input.trim().toLowerCase();
+  if (s === "hoy" || s === "today")
+    return today;
+  if (s === "mañana" || s === "manana" || s === "tomorrow")
+    return addDays(today, 1);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+    const d = new Date(`${s}T12:00:00Z`);
+    if (Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== s)
+      fail("usage/bad-date", `Fecha inválida: ${input}.`);
+    return s;
+  }
+  const wd = WEEKDAYS[s];
+  if (wd) {
+    const delta = (wd - isoWeekday(today) + 7) % 7;
+    return addDays(today, delta);
+  }
+  return fail("usage/bad-date", `No entiendo la fecha "${input}".`, "Usa YYYY-MM-DD, hoy, mañana o un día (lun, mar, mie…).");
+}
+function parseHour(input) {
+  if (input === undefined)
+    return fail("usage/missing-hour", "Falta la hora.", 'Ej: --hora 6 o --hora "6:00 AM".');
+  const s = input.trim().toLowerCase().replace(/\s+/g, "");
+  const m = /^(\d{1,2})(?::(\d{2}))?(am|pm|a\.m\.|p\.m\.)?$/.exec(s);
+  if (!m)
+    return fail("usage/bad-hour", `Hora inválida: ${input}.`);
+  let h = Number(m[1]);
+  const min = m[2] ? Number(m[2]) : 0;
+  const mer = m[3]?.replace(/\./g, "");
+  if (min !== 0)
+    fail("usage/bad-hour", "Las reservas son por horas en punto.", `Usa ${h}:00.`);
+  if (mer === "pm" && h < 12)
+    h += 12;
+  if (mer === "am" && h === 12)
+    h = 0;
+  if (h < 0 || h > 23 || mer && Number(m[1]) > 12)
+    fail("usage/bad-hour", `Hora fuera de rango: ${input}.`);
+  return h;
+}
+function hourLabel(h) {
+  const mer = h < 12 ? "AM" : "PM";
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  return `${h12}:00 ${mer}`;
+}
+function hh(h) {
+  return `${String(h).padStart(2, "0")}:00`;
+}
+function short(h) {
+  const m = h % 24 < 12 ? "AM" : "PM";
+  return { n: h % 12 === 0 ? 12 : h % 12, m };
+}
+function rangeLabel(run) {
+  const a = short(run[0]);
+  const b = short(run[run.length - 1] + 1);
+  return a.m === b.m ? `${a.n}–${b.n} ${b.m}` : `${a.n} ${a.m}–${b.n} ${b.m}`;
+}
+function rangesLabel(hours) {
+  const runs = [];
+  for (const h of [...hours].sort((x, y) => x - y)) {
+    const last = runs[runs.length - 1];
+    if (last && last[last.length - 1] === h - 1)
+      last.push(h);
+    else
+      runs.push([h]);
+  }
+  return runs.map(rangeLabel).join(", ");
+}
+
+// src/cefe/auth.ts
+import { readFileSync as readFileSync6 } from "node:fs";
+
+// src/cli/agent/prompt-secret.ts
+import { stdin, stderr as stdout } from "node:process";
+function promptSecret(label, options = {}) {
+  const mask = options.mask ?? "•";
+  if (!stdin.isTTY || typeof stdin.setRawMode !== "function") {
+    return Promise.resolve(null);
+  }
+  stdout.write(label);
+  return new Promise((resolve, reject) => {
+    const chars = [];
+    stdin.setRawMode(true);
+    stdin.resume();
+    stdin.setEncoding("utf8");
+    const cleanup = () => {
+      stdin.setRawMode(false);
+      stdin.pause();
+      stdin.removeListener("data", onData);
+    };
+    const onData = (chunk) => {
+      for (let i = 0;i < chunk.length; i++) {
+        const ch = chunk.charAt(i);
+        const code = ch.charCodeAt(0);
+        if (ch === "\r" || ch === `
+` || code === 4) {
+          stdout.write(`
+`);
+          cleanup();
+          resolve(chars.join(""));
+          return;
+        }
+        if (code === 3) {
+          stdout.write(`
+`);
+          cleanup();
+          reject(new Error("cancelled"));
+          return;
+        }
+        if (code === 8 || code === 127) {
+          if (chars.length > 0) {
+            chars.pop();
+            if (mask.length > 0)
+              stdout.write("\b \b");
+          }
+          continue;
+        }
+        if (code >= 32) {
+          chars.push(ch);
+          if (mask.length > 0)
+            stdout.write(mask);
+        }
+      }
+    };
+    stdin.on("data", onData);
+  });
+}
+
+// src/cli/foundation/config.ts
+import { existsSync as existsSync4, readFileSync as readFileSync3 } from "node:fs";
+import { join as join3 } from "node:path";
+
+// src/cli/foundation/atomic-write.ts
+import {
+  closeSync,
+  existsSync as existsSync3,
+  fdatasyncSync,
+  mkdirSync as mkdirSync2,
+  openSync,
+  renameSync,
+  unlinkSync as unlinkSync2,
+  writeSync
+} from "node:fs";
+import { dirname, join as join2 } from "node:path";
+import { platform as platform2 } from "node:os";
+function atomicWrite(filePath, content, options = {}) {
+  const { mode = 420, encoding = "utf8" } = options;
+  const dir = dirname(filePath);
+  const tmpPath = join2(dir, `.${Date.now()}.${Math.random().toString(36).slice(2, 8)}.tmp`);
+  mkdirSync2(dir, { recursive: true });
+  const data = typeof content === "string" ? Buffer.from(content, encoding) : content;
+  const fd = openSync(tmpPath, "w", mode);
+  try {
+    writeSync(fd, data);
+    fdatasyncSync(fd);
+  } finally {
+    closeSync(fd);
+  }
+  if (platform2() === "win32" && existsSync3(filePath)) {
+    unlinkSync2(filePath);
+  }
+  renameSync(tmpPath, filePath);
+}
+function atomicWriteJson(filePath, value, options = {}) {
+  atomicWrite(filePath, `${JSON.stringify(value, null, 2)}
+`, options);
+}
+
+// src/cli/foundation/config.ts
+function loadConfig(configDir, profile) {
+  const filePath = join3(configDir, "config.json");
+  let file = {};
+  if (existsSync4(filePath)) {
+    try {
+      file = JSON.parse(readFileSync3(filePath, "utf8"));
+    } catch {}
+  }
+  const defaults = file.defaults ?? {};
+  const profileOverrides = profile && file.profiles?.[profile] ? file.profiles[profile] : {};
+  return { ...defaults, ...profileOverrides };
+}
+function saveConfig(configDir, update) {
+  const filePath = join3(configDir, "config.json");
+  let existing = {};
+  if (existsSync4(filePath)) {
+    try {
+      existing = JSON.parse(readFileSync3(filePath, "utf8"));
+    } catch {}
+  }
+  const merged = {
+    defaults: { ...existing.defaults, ...update.defaults },
+    profiles: { ...existing.profiles, ...update.profiles }
+  };
+  atomicWriteJson(filePath, merged);
+}
+
+// src/cli/foundation/session.ts
+import { existsSync as existsSync5, readFileSync as readFileSync4, unlinkSync as unlinkSync3 } from "node:fs";
+import { join as join4 } from "node:path";
+var SESSION_FILE = "current.json";
+function loadSession(sessionsDir) {
+  const filePath = join4(sessionsDir, SESSION_FILE);
+  if (!existsSync5(filePath))
+    return null;
+  try {
+    return JSON.parse(readFileSync4(filePath, "utf8"));
+  } catch {
+    return null;
+  }
+}
+function saveSession(sessionsDir, session) {
+  atomicWriteJson(join4(sessionsDir, SESSION_FILE), session, { mode: 384 });
+}
+function clearSession(sessionsDir) {
+  const filePath = join4(sessionsDir, SESSION_FILE);
+  if (existsSync5(filePath)) {
+    unlinkSync3(filePath);
+  }
+}
+
 // src/core/paths.ts
 import { homedir } from "node:os";
-import { join as join2 } from "node:path";
-import { existsSync as existsSync3 } from "node:fs";
+import { join as join5 } from "node:path";
+import { existsSync as existsSync6 } from "node:fs";
 function appHome() {
   if (process.env.CUPO_HOME)
     return process.env.CUPO_HOME;
   if (process.env.IDRD_HOME)
     return process.env.IDRD_HOME;
-  const cupo = join2(homedir(), ".cupo");
-  const legacy = join2(homedir(), ".idrd");
-  return !existsSync3(cupo) && existsSync3(legacy) ? legacy : cupo;
+  const cupo = join5(homedir(), ".cupo");
+  const legacy = join5(homedir(), ".idrd");
+  return !existsSync6(cupo) && existsSync6(legacy) ? legacy : cupo;
 }
 function profileName(profile) {
   return profile || process.env.CUPO_PROFILE || process.env.IDRD_PROFILE || "default";
 }
 var paths = {
   config: () => appHome(),
-  sessions: (profile) => join2(appHome(), "sessions", profileName(profile)),
-  audit: () => join2(appHome(), "audit"),
-  bookings: (profile) => join2(appHome(), "bookings", profileName(profile)),
+  sessions: (profile) => join5(appHome(), "sessions", profileName(profile)),
+  audit: () => join5(appHome(), "audit"),
+  bookings: (profile) => join5(appHome(), "bookings", profileName(profile)),
   cefe: {
-    config: () => join2(appHome(), "cefe"),
-    sessions: (profile) => join2(appHome(), "cefe", "sessions", profileName(profile))
+    config: () => join5(appHome(), "cefe"),
+    sessions: (profile) => join5(appHome(), "cefe", "sessions", profileName(profile))
   }
 };
+
+// src/core/secrets.ts
+import { spawnSync } from "node:child_process";
+import { chmodSync, existsSync as existsSync7, mkdirSync as mkdirSync3, readFileSync as readFileSync5, statSync, writeFileSync as writeFileSync2 } from "node:fs";
+import { join as join6 } from "node:path";
+function secretBackend() {
+  const env = process.env.CUPO_SECRETS;
+  if (env === "keychain" || env === "file" || env === "none")
+    return env;
+  return process.platform === "darwin" && hasSecurityTool() ? "keychain" : "file";
+}
+var securityChecked;
+function hasSecurityTool() {
+  if (securityChecked === undefined)
+    securityChecked = existsSync7("/usr/bin/security");
+  return securityChecked;
+}
+function envFilePath() {
+  return join6(appHome(), "env");
+}
+function readEnvFile() {
+  const file = envFilePath();
+  if (!existsSync7(file))
+    return {};
+  const out = {};
+  for (const raw of readFileSync5(file, "utf8").split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line || line.startsWith("#"))
+      continue;
+    const eq = line.indexOf("=");
+    if (eq <= 0)
+      continue;
+    const key = line.slice(0, eq).trim().replace(/^export\s+/, "");
+    let value = line.slice(eq + 1).trim();
+    if (value.startsWith('"') && value.endsWith('"') || value.startsWith("'") && value.endsWith("'"))
+      value = value.slice(1, -1);
+    out[key] = value;
+  }
+  return out;
+}
+function envFileValue(key) {
+  return readEnvFile()[key];
+}
+function writeEnvFile(values) {
+  const file = envFilePath();
+  const merged = { ...readEnvFile(), ...values };
+  const lines = Object.entries(merged).filter(([, v]) => v !== undefined).map(([k, v]) => `${k}=${v}`);
+  mkdirSync3(appHome(), { recursive: true, mode: 448 });
+  writeFileSync2(file, lines.length ? `${lines.join(`
+`)}
+` : "", { mode: 384 });
+  chmodSync(file, 384);
+}
+var q = (s) => `"${s.replace(/\\/g, "\\\\").replace(/"/g, "\\\"")}"`;
+function keychainRead(service, account) {
+  const r = spawnSync("/usr/bin/security", ["find-generic-password", "-s", service, "-a", account, "-w"], { encoding: "utf8" });
+  if (r.status !== 0)
+    return;
+  const v = r.stdout.replace(/\r?\n$/, "");
+  return v || undefined;
+}
+function keychainWrite(service, account, value) {
+  const r = spawnSync("/usr/bin/security", ["-i"], { input: `add-generic-password -U -s ${q(service)} -a ${q(account)} -w ${q(value)}
+`, encoding: "utf8" });
+  if (r.status !== 0)
+    throw new Error(`security add-generic-password: ${r.stderr.trim() || `exit ${r.status}`}`);
+}
+function keychainDelete(service, account) {
+  const r = spawnSync("/usr/bin/security", ["delete-generic-password", "-s", service, "-a", account], { encoding: "utf8" });
+  return r.status === 0;
+}
+function loadSecret(ref) {
+  const fromFile = envFileValue(ref.envKey);
+  if (fromFile)
+    return { value: fromFile, source: "file" };
+  if (secretBackend() === "keychain") {
+    const v = keychainRead(ref.service, ref.account);
+    if (v)
+      return { value: v, source: "keychain" };
+  }
+  return;
+}
+function saveSecret(ref, value) {
+  const backend = secretBackend();
+  if (backend === "none")
+    throw new Error("CUPO_SECRETS=none: guardar contraseñas está deshabilitado.");
+  if (backend === "keychain") {
+    keychainWrite(ref.service, ref.account, value);
+    return { where: "keychain", detail: `Llavero de macOS (servicio ${ref.service}, cuenta ${ref.account})` };
+  }
+  writeEnvFile({ [ref.envKey]: value });
+  return { where: "file", detail: `${envFilePath()} (permisos 0600)` };
+}
+function forgetSecret(ref) {
+  const file = envFileValue(ref.envKey) !== undefined;
+  if (file)
+    writeEnvFile({ [ref.envKey]: undefined });
+  const keychain = secretBackend() === "keychain" ? keychainDelete(ref.service, ref.account) : false;
+  return { file, keychain };
+}
+function secretLocation(ref) {
+  return loadSecret(ref)?.source ?? null;
+}
+function envFileInsecure() {
+  const file = envFilePath();
+  if (!existsSync7(file) || process.platform === "win32")
+    return false;
+  return (statSync(file).mode & 63) !== 0;
+}
 
 // src/core/sanitize.ts
 var ANSI = /\x1b\[[0-9;?]*[ -/]*[@-~]/g;
@@ -765,57 +1169,339 @@ function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-// src/idrd/webclient.ts
-import { existsSync as existsSync5, readFileSync as readFileSync3, unlinkSync as unlinkSync3 } from "node:fs";
-import { join as join4 } from "node:path";
+// src/cefe/api.ts
+async function call(path, opts) {
+  const { what, ...rest } = opts;
+  const res = await request(HOSTS.cefe, path, rest);
+  return ensure(res, what);
+}
+function ensure(res, what) {
+  const msg = () => upstreamMessage(res.body);
+  if (res.status === 401)
+    fail("auth/unauthorized", `${what}: ${msg() || "sesión requerida"}.`, "Corre `cupo cefe auth login`.");
+  if (res.status === 403)
+    fail("auth/forbidden", `${what}: el servidor rechazó la solicitud (${msg()}).`, "Inicia sesión con `cupo cefe auth login`; si persiste, la ruta cambió.");
+  if (res.status === 404)
+    fail("not-found/resource", `${what}: no existe.`, msg());
+  if (res.status === 400 || res.status === 422)
+    fail("upstream/validation", `${what}: el servidor rechazó los datos.`, msg());
+  if (res.status >= 400)
+    fail("upstream/error", `${what}: HTTP ${res.status}.`, msg());
+  return res.body;
+}
+function arr(body, key) {
+  if (Array.isArray(body))
+    return body;
+  if (body && typeof body === "object") {
+    const b = body;
+    for (const k of [key, "data", "items", "reservations", "courses", "enrollments", "bookings", "slots"].filter(Boolean)) {
+      if (Array.isArray(b[k]))
+        return b[k];
+      if (b[k] && typeof b[k] === "object" && Array.isArray(b[k].data))
+        return b[k].data;
+    }
+    if (b.data && typeof b.data === "object" && !Array.isArray(b.data))
+      return arr(b.data, key);
+  }
+  return [];
+}
+function normalizeUser(u) {
+  const str2 = (v, n = 120) => v === null || v === undefined || v === "" ? null : cleanText(v, n);
+  return {
+    userId: String(u.userId ?? u.id ?? ""),
+    email: cleanText(u.email, 120),
+    name: cleanText(u.name, 120),
+    role: cleanText(u.role, 30),
+    phone: str2(u.phone, 30),
+    estrato: str2(u.estrato, 5),
+    dateOfBirth: str2(u.dateOfBirth, 30),
+    identification: str2(u.identification, 30),
+    documentType: str2(u.documentType, 10),
+    credits: Number(u.credits ?? 0) || 0,
+    reservasDisponibles: Number(u.reservasDisponibles ?? 0) || 0,
+    dependents: Array.isArray(u.dependents) ? u.dependents.map((d) => ({
+      name: cleanText(d.name, 120),
+      documentType: cleanText(d.documentType, 10),
+      identification: cleanText(d.identification, 30),
+      ...d.dateOfBirth ? { dateOfBirth: cleanText(d.dateOfBirth, 30) } : {},
+      ...d.relationship ? { relationship: cleanText(d.relationship, 40) } : {}
+    })) : [],
+    raw: u
+  };
+}
+async function login(email, password) {
+  const res = await request(HOSTS.cefe, "/auth/login", { method: "POST", body: { email: email.trim().toLowerCase(), password } });
+  if (res.status === 401 || res.status === 400)
+    fail("auth/invalid-credentials", "Correo o contraseña incorrectos.", "Verifica tus datos en cefechapinero.com/login.");
+  const body = ensure(res, "Login");
+  if (typeof body?.token !== "string" || !body?.user)
+    fail("auth/bad-response", "El servidor no devolvió un token.");
+  return { token: body.token, user: normalizeUser(body.user) };
+}
+async function register(body) {
+  const res = await request(HOSTS.cefe, "/auth/register", { method: "POST", body });
+  const out = ensure(res, "Registro");
+  if (typeof out?.token !== "string" || !out?.user)
+    fail("auth/bad-response", "El servidor no devolvió un token tras registrar.", upstreamMessage(out));
+  return { token: out.token, user: normalizeUser(out.user) };
+}
+async function getUser(token, userId) {
+  const body = await call(`/users/${encodeURIComponent(userId)}`, { token, what: "Perfil" });
+  return normalizeUser(body?.user ?? body?.data ?? body);
+}
+function normalizePool(p) {
+  return {
+    poolId: String(p.poolId ?? p.id),
+    name: cleanText(p.name, 120),
+    description: cleanText(p.description, 200),
+    capacity: Number(p.capacity ?? 0),
+    pricePerHour: Number(p.pricePerHour ?? 0),
+    active: Boolean(p.isActive ?? p.active ?? true),
+    hours: Array.isArray(p.schedules) ? p.schedules.map((s) => ({ day: cleanText(s.dayOfWeek, 20), open: cleanText(s.open, 5), close: cleanText(s.close, 5) })) : []
+  };
+}
+async function listPools() {
+  const body = await call("/pools", { what: "Piscinas" });
+  return arr(body, "pools").map(normalizePool);
+}
+async function getScheduleConfig(poolId) {
+  const body = await call(`/schedules/${encodeURIComponent(poolId)}`, { what: "Configuración de horarios" });
+  const cfg = body?.data ?? body ?? {};
+  const norm = (c) => c ? { isClosed: Boolean(c.isClosed), slots: Array.isArray(c.slots) ? c.slots.map((s) => ({ time: cleanText(s.time, 5), capacity: Number(s.capacity ?? c.defaultCapacity ?? 0) })) : [] } : undefined;
+  const weekly = {};
+  for (const [k, v] of Object.entries(cfg.weekly ?? {})) {
+    const n = norm(v);
+    if (n)
+      weekly[k.toUpperCase()] = n;
+  }
+  const overrides = Array.isArray(cfg.overrides) ? cfg.overrides.map((o) => ({ ...norm(o), date: cleanText(o.date, 10) })) : Object.entries(cfg.overrides ?? {}).map(([date, o]) => ({ ...norm(o), date }));
+  return { default: norm(cfg.default), weekly, overrides };
+}
+async function getPoolSlots(poolId, date) {
+  const body = await call("/pool-slots", { query: { poolId, date }, what: "Cupos" });
+  return arr(body, "slots").map((s) => ({ start: cleanText(s.date, 19), capacity: Number(s.capacity ?? 0), reserved: Number(s.reservedCount ?? 0), status: cleanText(s.status, 10) }));
+}
+function normalizeReservation(r) {
+  const uuid = r.userId_uuid ?? r.reservationId ?? r.id;
+  return {
+    id: r.poolId && uuid ? `${r.poolId}_${uuid}` : String(uuid ?? ""),
+    poolId: String(r.poolId ?? ""),
+    poolName: cleanText(r.poolName, 120),
+    startTime: cleanText(r.startTime, 25),
+    endTime: cleanText(r.endTime, 25),
+    status: cleanText(r.status, 20),
+    price: Number(r.price ?? 0) || 0,
+    paymentMethod: r.paymentMethod ? cleanText(r.paymentMethod, 20) : null,
+    paymentStatus: r.statusPayment ? cleanText(r.statusPayment, 30) : null,
+    wompiReference: r.wompiReference ? cleanText(r.wompiReference, 80) : null,
+    notes: cleanText(r.notes, 300),
+    dependents: Array.isArray(r.dependents) ? r.dependents.length : 0,
+    raw: r
+  };
+}
+async function userReservations(token, userId) {
+  const body = await call("/reservations", { token, query: { userId }, what: "Reservas" });
+  return arr(body, "reservations").map(normalizeReservation);
+}
+async function userReservationsByDate(token, userId, date) {
+  const body = await call(`/users/${encodeURIComponent(userId)}/reservas`, { token, query: { date }, what: "Reservas del día" });
+  return arr(body, "reservations").map(normalizeReservation);
+}
+async function userReservationsRange(token, userId, startDate, endDate, status) {
+  const body = await call(`/users/${encodeURIComponent(userId)}/reservas`, { token, query: { startDate, endDate, status }, what: "Reservas" });
+  return arr(body, "reservations").map(normalizeReservation);
+}
+async function createReservation(token, body) {
+  const out = await call("/reservations", { method: "POST", token, body, what: "Crear reserva" });
+  return out?.data ?? out ?? {};
+}
+async function cancelReservation(token, reservationId) {
+  await call(`/reservations/${encodeURIComponent(reservationId)}`, { method: "DELETE", token, what: "Cancelar reserva" });
+}
+function normalizeCourse(c) {
+  return {
+    courseId: String(c.courseId ?? c.id),
+    name: cleanText(c.name, 120),
+    group: cleanText(c.group, 80),
+    type: cleanText(c.type, 20),
+    description: cleanText(c.description, 600),
+    durationMin: Number(c.duration ?? 0),
+    classes: Number(c.numberOfClasses ?? 0),
+    price: Number(c.price ?? 0),
+    priceEstrato1_3: Number(c.priceEstrato1_3 ?? c.price ?? 0),
+    priceEstrato4_6: Number(c.priceEstrato4_6 ?? c.price ?? 0),
+    maxEnrollments: Number(c.maxEnrollments ?? 0),
+    maxPerUser: Number(c.maxEnrollmentsPerUser ?? 0),
+    full: Boolean(c.isFull),
+    instructor: cleanText(c.instructor, 80),
+    poolId: String(c.poolId ?? ""),
+    schedule: Array.isArray(c.schedule) ? c.schedule.map((s) => ({ day: cleanText(s.day, 12), start: cleanText(s.startTime, 5), end: cleanText(s.endTime, 5) })) : [],
+    startDate: cleanText(c.startDate, 25),
+    status: cleanText(c.status, 20)
+  };
+}
+async function listCourses(status) {
+  const body = await call("/courses", { query: { status }, what: "Cursos" });
+  return arr(body, "courses").map(normalizeCourse);
+}
+async function courseAvailability(courseId, startDate, endDate) {
+  const body = await call(`/courses/${encodeURIComponent(courseId)}/availability`, { query: { startDate, endDate }, what: "Disponibilidad del curso" });
+  const d = body?.data ?? body ?? {};
+  return {
+    courseName: cleanText(d.courseName, 120),
+    dates: (Array.isArray(d.dates) ? d.dates : []).map((x) => ({
+      date: cleanText(x.date, 10),
+      classes: (Array.isArray(x.classes) ? x.classes : []).map((c) => ({
+        at: cleanText(c.classDateTime, 19),
+        capacity: Number(c.maxCapacity ?? 0),
+        booked: Number(c.currentBookings ?? 0),
+        free: Number(c.availableSlots ?? 0),
+        available: Boolean(c.isAvailable)
+      }))
+    }))
+  };
+}
+async function userCourses(token, userId) {
+  return arr(await call(`/users/${encodeURIComponent(userId)}/courses`, { token, what: "Mis cursos" }), "courses");
+}
+async function enroll(token, courseId, userId, body) {
+  return call(`/courses/${encodeURIComponent(courseId)}/users/${encodeURIComponent(userId)}/enroll`, { method: "POST", token, body, what: "Inscripción al curso" });
+}
+async function classBookings(token, userId, filter = {}) {
+  return arr(await call(`/users/${encodeURIComponent(userId)}/class-bookings`, { token, query: filter, what: "Mis clases" }), "bookings");
+}
+async function bookClass(token, userId, courseId, classDateTime) {
+  const out = await call(`/users/${encodeURIComponent(userId)}/class-bookings`, { method: "POST", token, body: { courseId, classDateTime, status: "CONFIRMED" }, what: "Reservar clase" });
+  if (out && out.success === false)
+    fail("upstream/validation", `Reservar clase: ${cleanText(out.message, 200) || "rechazada"}.`);
+  return out ?? {};
+}
+async function cancelClass(token, userId, courseId, classDateTime) {
+  await call(`/users/${encodeURIComponent(userId)}/class-bookings`, { method: "DELETE", token, body: { courseId, classDateTime }, what: "Cancelar clase" });
+}
+async function listTournaments(token, status) {
+  return arr(await call("/tournaments", { token, query: { status }, what: "Torneos" }), "tournaments");
+}
+async function getTournament(token, id) {
+  const b = await call(`/tournaments/${encodeURIComponent(id)}`, { token, what: `Torneo ${id}` });
+  return b?.data ?? b ?? {};
+}
+async function competitions(token, id) {
+  return arr(await call(`/tournaments/${encodeURIComponent(id)}/competitions`, { token, what: "Competiciones" }), "competitions");
+}
+async function registerCompetition(token, t, c, body) {
+  return call(`/tournaments/${encodeURIComponent(t)}/competitions/${encodeURIComponent(c)}/register`, { method: "POST", token, body, what: "Inscripción al torneo" });
+}
+async function unregisterCompetition(token, t, c, dependentIdentification) {
+  await call(`/tournaments/${encodeURIComponent(t)}/competitions/${encodeURIComponent(c)}/register`, { method: "DELETE", token, body: dependentIdentification ? { dependentIdentification } : {}, what: "Cancelar inscripción" });
+}
+async function myRegistrations(token) {
+  return arr(await call("/tournaments/my-registrations", { token, what: "Mis inscripciones" }), "registrations");
+}
+async function listPromotions(status) {
+  return arr(await call("/promotions", { query: { status }, what: "Promociones" }), "promotions");
+}
+async function userPromotions(token, userId) {
+  return arr(await call(`/users/${encodeURIComponent(userId)}/promotions`, { token, what: "Mis promociones" }), "promotions");
+}
+async function poolRatingSummary(poolId) {
+  const b = await call(`/ratings/pool/${encodeURIComponent(poolId)}/summary/public`, { what: "Calificaciones" });
+  return b?.data ?? b ?? {};
+}
 
-// src/cli/foundation/atomic-write.ts
-import {
-  closeSync,
-  existsSync as existsSync4,
-  fdatasyncSync,
-  mkdirSync as mkdirSync2,
-  openSync,
-  renameSync,
-  unlinkSync as unlinkSync2,
-  writeSync
-} from "node:fs";
-import { dirname, join as join3 } from "node:path";
-import { platform as platform2 } from "node:os";
-function atomicWrite(filePath, content, options = {}) {
-  const { mode = 420, encoding = "utf8" } = options;
-  const dir = dirname(filePath);
-  const tmpPath = join3(dir, `.${Date.now()}.${Math.random().toString(36).slice(2, 8)}.tmp`);
-  mkdirSync2(dir, { recursive: true });
-  const data = typeof content === "string" ? Buffer.from(content, encoding) : content;
-  const fd = openSync(tmpPath, "w", mode);
+// src/cefe/auth.ts
+function storedEmail(profile) {
+  return loadConfig(paths.cefe.config(), profileName(profile)).email;
+}
+function currentSession(profile) {
+  return loadSession(paths.cefe.sessions(profile));
+}
+function tokenExpiry(token, now = Date.now()) {
   try {
-    writeSync(fd, data);
-    fdatasyncSync(fd);
-  } finally {
-    closeSync(fd);
-  }
-  if (platform2() === "win32" && existsSync4(filePath)) {
-    unlinkSync2(filePath);
-  }
-  renameSync(tmpPath, filePath);
+    const payload = JSON.parse(Buffer.from(token.split(".")[1] ?? "", "base64url").toString("utf8"));
+    if (typeof payload.exp === "number")
+      return new Date(payload.exp * 1000).toISOString();
+  } catch {}
+  return new Date(now + 12 * 3600000).toISOString();
 }
-function atomicWriteJson(filePath, value, options = {}) {
-  atomicWrite(filePath, `${JSON.stringify(value, null, 2)}
-`, options);
+var secretRef = (email) => ({ service: "cupo-cefe", account: email, envKey: "CEFE_PASSWORD" });
+function knownEmail(profile) {
+  return process.env.CEFE_EMAIL ?? envFileValue("CEFE_EMAIL") ?? storedEmail(profile);
+}
+function savedPassword(email) {
+  return process.env.CEFE_PASSWORD || loadSecret(secretRef(email))?.value;
+}
+async function resolvePassword(opts) {
+  if (process.env.CEFE_PASSWORD)
+    return process.env.CEFE_PASSWORD;
+  if (opts.stdin) {
+    const text = readFileSync6(0, "utf8").split(/\r?\n/)[0] ?? "";
+    if (!text)
+      fail("auth/password-required", "No llegó contraseña por stdin.");
+    return text;
+  }
+  if (opts.email) {
+    const saved = loadSecret(secretRef(opts.email));
+    if (saved)
+      return saved.value;
+  }
+  if (!opts.noInput) {
+    const pw = await promptSecret("Contraseña CEFE Chapinero: ");
+    if (pw)
+      return pw;
+  }
+  return fail("auth/password-required", "Necesito tu contraseña y no hay terminal interactiva.", "Exporta CEFE_PASSWORD, usa --password-stdin, o guárdala una vez con `cupo cefe auth login --save`.");
+}
+function forgetPassword(email) {
+  return forgetSecret(secretRef(email));
+}
+function passwordLocation(email) {
+  return email ? secretLocation(secretRef(email)) : null;
+}
+function persistSession(profile, email, token, user) {
+  const session = { createdAt: new Date().toISOString(), expiresAt: tokenExpiry(token), email, token, user };
+  saveSession(paths.cefe.sessions(profile), session);
+  saveConfig(paths.cefe.config(), { profiles: { [profileName(profile)]: { email } } });
+  return session;
+}
+async function login2(profile, email, password, opts = {}) {
+  const { token, user } = await login(email, password);
+  const session = persistSession(profile, email, token, user);
+  if (!opts.save)
+    return session;
+  const saved = saveSecret(secretRef(email), password);
+  return { ...session, savedTo: saved.detail };
+}
+function logoutLocal(profile) {
+  clearSession(paths.cefe.sessions(profile));
+}
+async function requireSession(profile) {
+  const s = currentSession(profile);
+  const expired = Boolean(s?.expiresAt && Date.parse(s.expiresAt) < nowMs());
+  if (s && !expired)
+    return s;
+  const email = s?.email ?? knownEmail(profile);
+  const password = email ? savedPassword(email) : undefined;
+  if (email && password)
+    return login2(profile, email, password);
+  if (!s)
+    return fail("auth/required", "No has iniciado sesión en CEFE Chapinero.", "Corre `cupo cefe auth login --email <tu correo>` (con --save no vuelve a pedir la contraseña).");
+  return fail("auth/expired", "La sesión de CEFE Chapinero venció.", "Corre `cupo cefe auth login` de nuevo (con --save no vuelve a pedir la contraseña).");
 }
 
 // src/idrd/webclient.ts
+import { existsSync as existsSync8, readFileSync as readFileSync7, unlinkSync as unlinkSync4 } from "node:fs";
+import { join as join7 } from "node:path";
 var TTL_MS = 7 * 24 * 3600000;
-var cacheFile = () => join4(appHome(), "web-client.json");
+var cacheFile = () => join7(appHome(), "web-client.json");
 async function webClient(opts = {}) {
   const envId = process.env.IDRD_CLIENT_ID;
   const envSecret = process.env.IDRD_CLIENT_SECRET;
   if (envId && envSecret)
     return { id: envId, secret: envSecret, source: "env" };
-  if (!opts.refresh && existsSync5(cacheFile())) {
+  if (!opts.refresh && existsSync8(cacheFile())) {
     try {
-      const c = JSON.parse(readFileSync3(cacheFile(), "utf8"));
+      const c = JSON.parse(readFileSync7(cacheFile(), "utf8"));
       if (c.id && c.secret && c.fetchedAt && Date.now() - Date.parse(c.fetchedAt) < TTL_MS) {
         return { id: c.id, secret: c.secret, source: "cache" };
       }
@@ -1236,233 +1922,12 @@ async function paymentHistory(token) {
 }
 
 // src/idrd/auth.ts
-import { readFileSync as readFileSync7 } from "node:fs";
-
-// src/cli/agent/prompt-secret.ts
-import { stdin, stderr as stdout } from "node:process";
-function promptSecret(label, options = {}) {
-  const mask = options.mask ?? "•";
-  if (!stdin.isTTY || typeof stdin.setRawMode !== "function") {
-    return Promise.resolve(null);
-  }
-  stdout.write(label);
-  return new Promise((resolve, reject) => {
-    const chars = [];
-    stdin.setRawMode(true);
-    stdin.resume();
-    stdin.setEncoding("utf8");
-    const cleanup = () => {
-      stdin.setRawMode(false);
-      stdin.pause();
-      stdin.removeListener("data", onData);
-    };
-    const onData = (chunk) => {
-      for (let i = 0;i < chunk.length; i++) {
-        const ch = chunk.charAt(i);
-        const code = ch.charCodeAt(0);
-        if (ch === "\r" || ch === `
-` || code === 4) {
-          stdout.write(`
-`);
-          cleanup();
-          resolve(chars.join(""));
-          return;
-        }
-        if (code === 3) {
-          stdout.write(`
-`);
-          cleanup();
-          reject(new Error("cancelled"));
-          return;
-        }
-        if (code === 8 || code === 127) {
-          if (chars.length > 0) {
-            chars.pop();
-            if (mask.length > 0)
-              stdout.write("\b \b");
-          }
-          continue;
-        }
-        if (code >= 32) {
-          chars.push(ch);
-          if (mask.length > 0)
-            stdout.write(mask);
-        }
-      }
-    };
-    stdin.on("data", onData);
-  });
-}
-
-// src/cli/foundation/config.ts
-import { existsSync as existsSync6, readFileSync as readFileSync4 } from "node:fs";
-import { join as join5 } from "node:path";
-function loadConfig(configDir, profile) {
-  const filePath = join5(configDir, "config.json");
-  let file = {};
-  if (existsSync6(filePath)) {
-    try {
-      file = JSON.parse(readFileSync4(filePath, "utf8"));
-    } catch {}
-  }
-  const defaults = file.defaults ?? {};
-  const profileOverrides = profile && file.profiles?.[profile] ? file.profiles[profile] : {};
-  return { ...defaults, ...profileOverrides };
-}
-function saveConfig(configDir, update) {
-  const filePath = join5(configDir, "config.json");
-  let existing = {};
-  if (existsSync6(filePath)) {
-    try {
-      existing = JSON.parse(readFileSync4(filePath, "utf8"));
-    } catch {}
-  }
-  const merged = {
-    defaults: { ...existing.defaults, ...update.defaults },
-    profiles: { ...existing.profiles, ...update.profiles }
-  };
-  atomicWriteJson(filePath, merged);
-}
-
-// src/cli/foundation/session.ts
-import { existsSync as existsSync7, readFileSync as readFileSync5, unlinkSync as unlinkSync4 } from "node:fs";
-import { join as join6 } from "node:path";
-var SESSION_FILE = "current.json";
-function loadSession(sessionsDir) {
-  const filePath = join6(sessionsDir, SESSION_FILE);
-  if (!existsSync7(filePath))
-    return null;
-  try {
-    return JSON.parse(readFileSync5(filePath, "utf8"));
-  } catch {
-    return null;
-  }
-}
-function saveSession(sessionsDir, session) {
-  atomicWriteJson(join6(sessionsDir, SESSION_FILE), session, { mode: 384 });
-}
-function clearSession(sessionsDir) {
-  const filePath = join6(sessionsDir, SESSION_FILE);
-  if (existsSync7(filePath)) {
-    unlinkSync4(filePath);
-  }
-}
-
-// src/core/secrets.ts
-import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync as existsSync8, mkdirSync as mkdirSync3, readFileSync as readFileSync6, statSync, writeFileSync as writeFileSync2 } from "node:fs";
-import { join as join7 } from "node:path";
-function secretBackend() {
-  const env = process.env.CUPO_SECRETS;
-  if (env === "keychain" || env === "file" || env === "none")
-    return env;
-  return process.platform === "darwin" && hasSecurityTool() ? "keychain" : "file";
-}
-var securityChecked;
-function hasSecurityTool() {
-  if (securityChecked === undefined)
-    securityChecked = existsSync8("/usr/bin/security");
-  return securityChecked;
-}
-function envFilePath() {
-  return join7(appHome(), "env");
-}
-function readEnvFile() {
-  const file = envFilePath();
-  if (!existsSync8(file))
-    return {};
-  const out = {};
-  for (const raw of readFileSync6(file, "utf8").split(/\r?\n/)) {
-    const line = raw.trim();
-    if (!line || line.startsWith("#"))
-      continue;
-    const eq = line.indexOf("=");
-    if (eq <= 0)
-      continue;
-    const key = line.slice(0, eq).trim().replace(/^export\s+/, "");
-    let value = line.slice(eq + 1).trim();
-    if (value.startsWith('"') && value.endsWith('"') || value.startsWith("'") && value.endsWith("'"))
-      value = value.slice(1, -1);
-    out[key] = value;
-  }
-  return out;
-}
-function envFileValue(key) {
-  return readEnvFile()[key];
-}
-function writeEnvFile(values) {
-  const file = envFilePath();
-  const merged = { ...readEnvFile(), ...values };
-  const lines = Object.entries(merged).filter(([, v]) => v !== undefined).map(([k, v]) => `${k}=${v}`);
-  mkdirSync3(appHome(), { recursive: true, mode: 448 });
-  writeFileSync2(file, lines.length ? `${lines.join(`
-`)}
-` : "", { mode: 384 });
-  chmodSync(file, 384);
-}
-var q = (s) => `"${s.replace(/\\/g, "\\\\").replace(/"/g, "\\\"")}"`;
-function keychainRead(service, account) {
-  const r = spawnSync("/usr/bin/security", ["find-generic-password", "-s", service, "-a", account, "-w"], { encoding: "utf8" });
-  if (r.status !== 0)
-    return;
-  const v = r.stdout.replace(/\r?\n$/, "");
-  return v || undefined;
-}
-function keychainWrite(service, account, value) {
-  const r = spawnSync("/usr/bin/security", ["-i"], { input: `add-generic-password -U -s ${q(service)} -a ${q(account)} -w ${q(value)}
-`, encoding: "utf8" });
-  if (r.status !== 0)
-    throw new Error(`security add-generic-password: ${r.stderr.trim() || `exit ${r.status}`}`);
-}
-function keychainDelete(service, account) {
-  const r = spawnSync("/usr/bin/security", ["delete-generic-password", "-s", service, "-a", account], { encoding: "utf8" });
-  return r.status === 0;
-}
-function loadSecret(ref) {
-  const fromFile = envFileValue(ref.envKey);
-  if (fromFile)
-    return { value: fromFile, source: "file" };
-  if (secretBackend() === "keychain") {
-    const v = keychainRead(ref.service, ref.account);
-    if (v)
-      return { value: v, source: "keychain" };
-  }
-  return;
-}
-function saveSecret(ref, value) {
-  const backend = secretBackend();
-  if (backend === "none")
-    throw new Error("CUPO_SECRETS=none: guardar contraseñas está deshabilitado.");
-  if (backend === "keychain") {
-    keychainWrite(ref.service, ref.account, value);
-    return { where: "keychain", detail: `Llavero de macOS (servicio ${ref.service}, cuenta ${ref.account})` };
-  }
-  writeEnvFile({ [ref.envKey]: value });
-  return { where: "file", detail: `${envFilePath()} (permisos 0600)` };
-}
-function forgetSecret(ref) {
-  const file = envFileValue(ref.envKey) !== undefined;
-  if (file)
-    writeEnvFile({ [ref.envKey]: undefined });
-  const keychain = secretBackend() === "keychain" ? keychainDelete(ref.service, ref.account) : false;
-  return { file, keychain };
-}
-function secretLocation(ref) {
-  return loadSecret(ref)?.source ?? null;
-}
-function envFileInsecure() {
-  const file = envFilePath();
-  if (!existsSync8(file) || process.platform === "win32")
-    return false;
-  return (statSync(file).mode & 63) !== 0;
-}
-
-// src/idrd/auth.ts
+import { readFileSync as readFileSync8 } from "node:fs";
 var REFRESH_MARGIN_MS = 5 * 60000;
-function storedEmail(profile) {
+function storedEmail2(profile) {
   return loadConfig(paths.config(), profileName(profile)).email;
 }
-function currentSession(profile) {
+function currentSession2(profile) {
   return loadSession(paths.sessions(profile));
 }
 function persist(profile, email, t, previousRefresh) {
@@ -1477,24 +1942,24 @@ function persist(profile, email, t, previousRefresh) {
   saveSession(paths.sessions(profile), session);
   return session;
 }
-var secretRef = (email) => ({ service: "cupo-idrd", account: email, envKey: "IDRD_PASSWORD" });
-function knownEmail(profile) {
-  return process.env.IDRD_EMAIL ?? envFileValue("IDRD_EMAIL") ?? storedEmail(profile);
+var secretRef2 = (email) => ({ service: "cupo-idrd", account: email, envKey: "IDRD_PASSWORD" });
+function knownEmail2(profile) {
+  return process.env.IDRD_EMAIL ?? envFileValue("IDRD_EMAIL") ?? storedEmail2(profile);
 }
-function savedPassword(email) {
-  return process.env.IDRD_PASSWORD || loadSecret(secretRef(email))?.value;
+function savedPassword2(email) {
+  return process.env.IDRD_PASSWORD || loadSecret(secretRef2(email))?.value;
 }
-async function resolvePassword(opts) {
+async function resolvePassword2(opts) {
   if (process.env.IDRD_PASSWORD)
     return process.env.IDRD_PASSWORD;
   if (opts.stdin) {
-    const text = readFileSync7(0, "utf8").split(/\r?\n/)[0] ?? "";
+    const text = readFileSync8(0, "utf8").split(/\r?\n/)[0] ?? "";
     if (!text)
       fail("auth/password-required", "No llegó contraseña por stdin.");
     return text;
   }
   if (opts.email) {
-    const saved = loadSecret(secretRef(opts.email));
+    const saved = loadSecret(secretRef2(opts.email));
     if (saved)
       return saved.value;
   }
@@ -1505,36 +1970,36 @@ async function resolvePassword(opts) {
   }
   return fail("auth/password-required", "Necesito tu contraseña y no hay terminal interactiva.", "Exporta IDRD_PASSWORD, usa --password-stdin, o guárdala una vez con `cupo idrd auth login --save`.");
 }
-async function login(profile, email, password, opts = {}) {
+async function login3(profile, email, password, opts = {}) {
   const tokens = await passwordGrant(email, password);
   saveConfig(paths.config(), { profiles: { [profileName(profile)]: { email } } });
   const session = persist(profile, email, tokens);
   if (!opts.save)
     return session;
-  const saved = saveSecret(secretRef(email), password);
+  const saved = saveSecret(secretRef2(email), password);
   return { ...session, savedTo: saved.detail };
 }
-function forgetPassword(email) {
-  return forgetSecret(secretRef(email));
+function forgetPassword2(email) {
+  return forgetSecret(secretRef2(email));
 }
-function passwordLocation(email) {
-  return email ? secretLocation(secretRef(email)) : null;
+function passwordLocation2(email) {
+  return email ? secretLocation(secretRef2(email)) : null;
 }
 async function autoLogin(profile, email) {
   if (!email)
     return null;
-  const password = savedPassword(email);
+  const password = savedPassword2(email);
   if (!password)
     return null;
-  return login(profile, email, password);
+  return login3(profile, email, password);
 }
-function logoutLocal(profile) {
+function logoutLocal2(profile) {
   clearSession(paths.sessions(profile));
 }
 async function accessToken(profile) {
-  const session = currentSession(profile);
+  const session = currentSession2(profile);
   if (!session) {
-    const auto2 = await autoLogin(profile, knownEmail(profile));
+    const auto2 = await autoLogin(profile, knownEmail2(profile));
     if (auto2)
       return { token: auto2.accessToken, session: auto2, refreshed: true };
     fail("auth/required", "No has iniciado sesión.", "Corre `cupo idrd auth login --email <tu correo>` (con --save no vuelve a pedir la contraseña).");
@@ -1559,7 +2024,7 @@ async function accessToken(profile) {
 }
 
 // src/idrd/payment.ts
-import { readdirSync, readFileSync as readFileSync8 } from "node:fs";
+import { readdirSync, readFileSync as readFileSync9 } from "node:fs";
 import { join as join8 } from "node:path";
 var RECEIPT_BASE = "https://portalciudadano.idrd.gov.co/app/pagos/comprobante/";
 function normalizeBooking(raw, ctx) {
@@ -1590,14 +2055,14 @@ function saveBooking(profile, b) {
 }
 function loadBooking(profile, bookingId) {
   try {
-    return JSON.parse(readFileSync8(join8(paths.bookings(profile), `${bookingId}.json`), "utf8"));
+    return JSON.parse(readFileSync9(join8(paths.bookings(profile), `${bookingId}.json`), "utf8"));
   } catch {
     return fail("not-found/booking", `No tengo registrada la reserva ${bookingId} en este equipo.`, "Solo se puede pagar una reserva creada con `cupo idrd booking create`.");
   }
 }
 function localBookings(profile) {
   try {
-    return readdirSync(paths.bookings(profile)).filter((f) => f.endsWith(".json")).map((f) => JSON.parse(readFileSync8(join8(paths.bookings(profile), f), "utf8")));
+    return readdirSync(paths.bookings(profile)).filter((f) => f.endsWith(".json")).map((f) => JSON.parse(readFileSync9(join8(paths.bookings(profile), f), "utf8")));
   } catch {
     return [];
   }
@@ -1971,473 +2436,6 @@ function findCommand(words) {
   return null;
 }
 
-// src/core/table.ts
-function table(headers, rows, maxWidths = []) {
-  const widths = headers.map((h, i) => {
-    const natural = Math.max(visibleWidth(h), ...rows.map((r) => visibleWidth(r[i] ?? "")));
-    return maxWidths[i] ? Math.min(natural, maxWidths[i]) : natural;
-  });
-  const line = (cells) => cells.map((c, i) => padVisible(truncateVisible(c ?? "", widths[i]), widths[i])).join("  ").trimEnd();
-  return [bold(line(headers)), dim(widths.map((w) => "─".repeat(w)).join("  ")), ...rows.map(line)].join(`
-`);
-}
-
-// src/cefe/auth.ts
-import { readFileSync as readFileSync9 } from "node:fs";
-
-// src/idrd/time.ts
-var TZ = "America/Bogota";
-var nowImpl = () => new Date;
-function nowMs() {
-  return nowImpl().getTime();
-}
-function bogotaNow() {
-  const parts = Object.fromEntries(new Intl.DateTimeFormat("en-CA", {
-    timeZone: TZ,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hourCycle: "h23"
-  }).formatToParts(nowImpl()).map((p) => [p.type, p.value]));
-  const date = `${parts.year}-${parts.month}-${parts.day}`;
-  return { date, hour: Number(parts.hour), minute: Number(parts.minute), isoWeekday: isoWeekday(date) };
-}
-function isoWeekday(date) {
-  const d = new Date(`${date}T12:00:00Z`).getUTCDay();
-  return d === 0 ? 7 : d;
-}
-function addDays(date, n) {
-  const d = new Date(`${date}T12:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + n);
-  return d.toISOString().slice(0, 10);
-}
-var WEEKDAYS = {
-  lun: 1,
-  lunes: 1,
-  mon: 1,
-  monday: 1,
-  mar: 2,
-  martes: 2,
-  tue: 2,
-  tuesday: 2,
-  mie: 3,
-  mié: 3,
-  miercoles: 3,
-  miércoles: 3,
-  wed: 3,
-  wednesday: 3,
-  jue: 4,
-  jueves: 4,
-  thu: 4,
-  thursday: 4,
-  vie: 5,
-  viernes: 5,
-  fri: 5,
-  friday: 5,
-  sab: 6,
-  sáb: 6,
-  sabado: 6,
-  sábado: 6,
-  sat: 6,
-  saturday: 6,
-  dom: 7,
-  domingo: 7,
-  sun: 7,
-  sunday: 7
-};
-function parseDate(input) {
-  const today = bogotaNow().date;
-  if (!input)
-    return today;
-  const s = input.trim().toLowerCase();
-  if (s === "hoy" || s === "today")
-    return today;
-  if (s === "mañana" || s === "manana" || s === "tomorrow")
-    return addDays(today, 1);
-  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
-    const d = new Date(`${s}T12:00:00Z`);
-    if (Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== s)
-      fail("usage/bad-date", `Fecha inválida: ${input}.`);
-    return s;
-  }
-  const wd = WEEKDAYS[s];
-  if (wd) {
-    const delta = (wd - isoWeekday(today) + 7) % 7;
-    return addDays(today, delta);
-  }
-  return fail("usage/bad-date", `No entiendo la fecha "${input}".`, "Usa YYYY-MM-DD, hoy, mañana o un día (lun, mar, mie…).");
-}
-function parseHour(input) {
-  if (input === undefined)
-    return fail("usage/missing-hour", "Falta la hora.", 'Ej: --hora 6 o --hora "6:00 AM".');
-  const s = input.trim().toLowerCase().replace(/\s+/g, "");
-  const m = /^(\d{1,2})(?::(\d{2}))?(am|pm|a\.m\.|p\.m\.)?$/.exec(s);
-  if (!m)
-    return fail("usage/bad-hour", `Hora inválida: ${input}.`);
-  let h = Number(m[1]);
-  const min = m[2] ? Number(m[2]) : 0;
-  const mer = m[3]?.replace(/\./g, "");
-  if (min !== 0)
-    fail("usage/bad-hour", "Las reservas son por horas en punto.", `Usa ${h}:00.`);
-  if (mer === "pm" && h < 12)
-    h += 12;
-  if (mer === "am" && h === 12)
-    h = 0;
-  if (h < 0 || h > 23 || mer && Number(m[1]) > 12)
-    fail("usage/bad-hour", `Hora fuera de rango: ${input}.`);
-  return h;
-}
-function hourLabel(h) {
-  const mer = h < 12 ? "AM" : "PM";
-  const h12 = h % 12 === 0 ? 12 : h % 12;
-  return `${h12}:00 ${mer}`;
-}
-function hh(h) {
-  return `${String(h).padStart(2, "0")}:00`;
-}
-function short(h) {
-  const m = h % 24 < 12 ? "AM" : "PM";
-  return { n: h % 12 === 0 ? 12 : h % 12, m };
-}
-function rangeLabel(run) {
-  const a = short(run[0]);
-  const b = short(run[run.length - 1] + 1);
-  return a.m === b.m ? `${a.n}–${b.n} ${b.m}` : `${a.n} ${a.m}–${b.n} ${b.m}`;
-}
-function rangesLabel(hours) {
-  const runs = [];
-  for (const h of [...hours].sort((x, y) => x - y)) {
-    const last = runs[runs.length - 1];
-    if (last && last[last.length - 1] === h - 1)
-      last.push(h);
-    else
-      runs.push([h]);
-  }
-  return runs.map(rangeLabel).join(", ");
-}
-
-// src/cefe/api.ts
-async function call(path, opts) {
-  const { what, ...rest } = opts;
-  const res = await request(HOSTS.cefe, path, rest);
-  return ensure(res, what);
-}
-function ensure(res, what) {
-  const msg = () => upstreamMessage(res.body);
-  if (res.status === 401)
-    fail("auth/unauthorized", `${what}: ${msg() || "sesión requerida"}.`, "Corre `cupo cefe auth login`.");
-  if (res.status === 403)
-    fail("auth/forbidden", `${what}: el servidor rechazó la solicitud (${msg()}).`, "Inicia sesión con `cupo cefe auth login`; si persiste, la ruta cambió.");
-  if (res.status === 404)
-    fail("not-found/resource", `${what}: no existe.`, msg());
-  if (res.status === 400 || res.status === 422)
-    fail("upstream/validation", `${what}: el servidor rechazó los datos.`, msg());
-  if (res.status >= 400)
-    fail("upstream/error", `${what}: HTTP ${res.status}.`, msg());
-  return res.body;
-}
-function arr(body, key) {
-  if (Array.isArray(body))
-    return body;
-  if (body && typeof body === "object") {
-    const b = body;
-    for (const k of [key, "data", "items", "reservations", "courses", "enrollments", "bookings", "slots"].filter(Boolean)) {
-      if (Array.isArray(b[k]))
-        return b[k];
-      if (b[k] && typeof b[k] === "object" && Array.isArray(b[k].data))
-        return b[k].data;
-    }
-    if (b.data && typeof b.data === "object" && !Array.isArray(b.data))
-      return arr(b.data, key);
-  }
-  return [];
-}
-function normalizeUser(u) {
-  const str2 = (v, n = 120) => v === null || v === undefined || v === "" ? null : cleanText(v, n);
-  return {
-    userId: String(u.userId ?? u.id ?? ""),
-    email: cleanText(u.email, 120),
-    name: cleanText(u.name, 120),
-    role: cleanText(u.role, 30),
-    phone: str2(u.phone, 30),
-    estrato: str2(u.estrato, 5),
-    dateOfBirth: str2(u.dateOfBirth, 30),
-    identification: str2(u.identification, 30),
-    documentType: str2(u.documentType, 10),
-    credits: Number(u.credits ?? 0) || 0,
-    reservasDisponibles: Number(u.reservasDisponibles ?? 0) || 0,
-    dependents: Array.isArray(u.dependents) ? u.dependents.map((d) => ({
-      name: cleanText(d.name, 120),
-      documentType: cleanText(d.documentType, 10),
-      identification: cleanText(d.identification, 30),
-      ...d.dateOfBirth ? { dateOfBirth: cleanText(d.dateOfBirth, 30) } : {},
-      ...d.relationship ? { relationship: cleanText(d.relationship, 40) } : {}
-    })) : [],
-    raw: u
-  };
-}
-async function login2(email, password) {
-  const res = await request(HOSTS.cefe, "/auth/login", { method: "POST", body: { email: email.trim().toLowerCase(), password } });
-  if (res.status === 401 || res.status === 400)
-    fail("auth/invalid-credentials", "Correo o contraseña incorrectos.", "Verifica tus datos en cefechapinero.com/login.");
-  const body = ensure(res, "Login");
-  if (typeof body?.token !== "string" || !body?.user)
-    fail("auth/bad-response", "El servidor no devolvió un token.");
-  return { token: body.token, user: normalizeUser(body.user) };
-}
-async function register(body) {
-  const res = await request(HOSTS.cefe, "/auth/register", { method: "POST", body });
-  const out = ensure(res, "Registro");
-  if (typeof out?.token !== "string" || !out?.user)
-    fail("auth/bad-response", "El servidor no devolvió un token tras registrar.", upstreamMessage(out));
-  return { token: out.token, user: normalizeUser(out.user) };
-}
-async function getUser(token, userId) {
-  const body = await call(`/users/${encodeURIComponent(userId)}`, { token, what: "Perfil" });
-  return normalizeUser(body?.user ?? body?.data ?? body);
-}
-function normalizePool(p) {
-  return {
-    poolId: String(p.poolId ?? p.id),
-    name: cleanText(p.name, 120),
-    description: cleanText(p.description, 200),
-    capacity: Number(p.capacity ?? 0),
-    pricePerHour: Number(p.pricePerHour ?? 0),
-    active: Boolean(p.isActive ?? p.active ?? true),
-    hours: Array.isArray(p.schedules) ? p.schedules.map((s) => ({ day: cleanText(s.dayOfWeek, 20), open: cleanText(s.open, 5), close: cleanText(s.close, 5) })) : []
-  };
-}
-async function listPools() {
-  const body = await call("/pools", { what: "Piscinas" });
-  return arr(body, "pools").map(normalizePool);
-}
-async function getScheduleConfig(poolId) {
-  const body = await call(`/schedules/${encodeURIComponent(poolId)}`, { what: "Configuración de horarios" });
-  const cfg = body?.data ?? body ?? {};
-  const norm = (c) => c ? { isClosed: Boolean(c.isClosed), slots: Array.isArray(c.slots) ? c.slots.map((s) => ({ time: cleanText(s.time, 5), capacity: Number(s.capacity ?? c.defaultCapacity ?? 0) })) : [] } : undefined;
-  const weekly = {};
-  for (const [k, v] of Object.entries(cfg.weekly ?? {})) {
-    const n = norm(v);
-    if (n)
-      weekly[k.toUpperCase()] = n;
-  }
-  const overrides = Array.isArray(cfg.overrides) ? cfg.overrides.map((o) => ({ ...norm(o), date: cleanText(o.date, 10) })) : Object.entries(cfg.overrides ?? {}).map(([date, o]) => ({ ...norm(o), date }));
-  return { default: norm(cfg.default), weekly, overrides };
-}
-async function getPoolSlots(poolId, date) {
-  const body = await call("/pool-slots", { query: { poolId, date }, what: "Cupos" });
-  return arr(body, "slots").map((s) => ({ start: cleanText(s.date, 19), capacity: Number(s.capacity ?? 0), reserved: Number(s.reservedCount ?? 0), status: cleanText(s.status, 10) }));
-}
-function normalizeReservation(r) {
-  const uuid = r.userId_uuid ?? r.reservationId ?? r.id;
-  return {
-    id: r.poolId && uuid ? `${r.poolId}_${uuid}` : String(uuid ?? ""),
-    poolId: String(r.poolId ?? ""),
-    poolName: cleanText(r.poolName, 120),
-    startTime: cleanText(r.startTime, 25),
-    endTime: cleanText(r.endTime, 25),
-    status: cleanText(r.status, 20),
-    price: Number(r.price ?? 0) || 0,
-    paymentMethod: r.paymentMethod ? cleanText(r.paymentMethod, 20) : null,
-    paymentStatus: r.statusPayment ? cleanText(r.statusPayment, 30) : null,
-    wompiReference: r.wompiReference ? cleanText(r.wompiReference, 80) : null,
-    notes: cleanText(r.notes, 300),
-    dependents: Array.isArray(r.dependents) ? r.dependents.length : 0,
-    raw: r
-  };
-}
-async function userReservations(token, userId) {
-  const body = await call("/reservations", { token, query: { userId }, what: "Reservas" });
-  return arr(body, "reservations").map(normalizeReservation);
-}
-async function userReservationsByDate(token, userId, date) {
-  const body = await call(`/users/${encodeURIComponent(userId)}/reservas`, { token, query: { date }, what: "Reservas del día" });
-  return arr(body, "reservations").map(normalizeReservation);
-}
-async function userReservationsRange(token, userId, startDate, endDate, status) {
-  const body = await call(`/users/${encodeURIComponent(userId)}/reservas`, { token, query: { startDate, endDate, status }, what: "Reservas" });
-  return arr(body, "reservations").map(normalizeReservation);
-}
-async function createReservation(token, body) {
-  const out = await call("/reservations", { method: "POST", token, body, what: "Crear reserva" });
-  return out?.data ?? out ?? {};
-}
-async function cancelReservation(token, reservationId) {
-  await call(`/reservations/${encodeURIComponent(reservationId)}`, { method: "DELETE", token, what: "Cancelar reserva" });
-}
-function normalizeCourse(c) {
-  return {
-    courseId: String(c.courseId ?? c.id),
-    name: cleanText(c.name, 120),
-    group: cleanText(c.group, 80),
-    type: cleanText(c.type, 20),
-    description: cleanText(c.description, 600),
-    durationMin: Number(c.duration ?? 0),
-    classes: Number(c.numberOfClasses ?? 0),
-    price: Number(c.price ?? 0),
-    priceEstrato1_3: Number(c.priceEstrato1_3 ?? c.price ?? 0),
-    priceEstrato4_6: Number(c.priceEstrato4_6 ?? c.price ?? 0),
-    maxEnrollments: Number(c.maxEnrollments ?? 0),
-    maxPerUser: Number(c.maxEnrollmentsPerUser ?? 0),
-    full: Boolean(c.isFull),
-    instructor: cleanText(c.instructor, 80),
-    poolId: String(c.poolId ?? ""),
-    schedule: Array.isArray(c.schedule) ? c.schedule.map((s) => ({ day: cleanText(s.day, 12), start: cleanText(s.startTime, 5), end: cleanText(s.endTime, 5) })) : [],
-    startDate: cleanText(c.startDate, 25),
-    status: cleanText(c.status, 20)
-  };
-}
-async function listCourses(status) {
-  const body = await call("/courses", { query: { status }, what: "Cursos" });
-  return arr(body, "courses").map(normalizeCourse);
-}
-async function courseAvailability(courseId, startDate, endDate) {
-  const body = await call(`/courses/${encodeURIComponent(courseId)}/availability`, { query: { startDate, endDate }, what: "Disponibilidad del curso" });
-  const d = body?.data ?? body ?? {};
-  return {
-    courseName: cleanText(d.courseName, 120),
-    dates: (Array.isArray(d.dates) ? d.dates : []).map((x) => ({
-      date: cleanText(x.date, 10),
-      classes: (Array.isArray(x.classes) ? x.classes : []).map((c) => ({
-        at: cleanText(c.classDateTime, 19),
-        capacity: Number(c.maxCapacity ?? 0),
-        booked: Number(c.currentBookings ?? 0),
-        free: Number(c.availableSlots ?? 0),
-        available: Boolean(c.isAvailable)
-      }))
-    }))
-  };
-}
-async function userCourses(token, userId) {
-  return arr(await call(`/users/${encodeURIComponent(userId)}/courses`, { token, what: "Mis cursos" }), "courses");
-}
-async function enroll(token, courseId, userId, body) {
-  return call(`/courses/${encodeURIComponent(courseId)}/users/${encodeURIComponent(userId)}/enroll`, { method: "POST", token, body, what: "Inscripción al curso" });
-}
-async function classBookings(token, userId, filter = {}) {
-  return arr(await call(`/users/${encodeURIComponent(userId)}/class-bookings`, { token, query: filter, what: "Mis clases" }), "bookings");
-}
-async function bookClass(token, userId, courseId, classDateTime) {
-  const out = await call(`/users/${encodeURIComponent(userId)}/class-bookings`, { method: "POST", token, body: { courseId, classDateTime, status: "CONFIRMED" }, what: "Reservar clase" });
-  if (out && out.success === false)
-    fail("upstream/validation", `Reservar clase: ${cleanText(out.message, 200) || "rechazada"}.`);
-  return out ?? {};
-}
-async function cancelClass(token, userId, courseId, classDateTime) {
-  await call(`/users/${encodeURIComponent(userId)}/class-bookings`, { method: "DELETE", token, body: { courseId, classDateTime }, what: "Cancelar clase" });
-}
-async function listTournaments(token, status) {
-  return arr(await call("/tournaments", { token, query: { status }, what: "Torneos" }), "tournaments");
-}
-async function getTournament(token, id) {
-  const b = await call(`/tournaments/${encodeURIComponent(id)}`, { token, what: `Torneo ${id}` });
-  return b?.data ?? b ?? {};
-}
-async function competitions(token, id) {
-  return arr(await call(`/tournaments/${encodeURIComponent(id)}/competitions`, { token, what: "Competiciones" }), "competitions");
-}
-async function registerCompetition(token, t, c, body) {
-  return call(`/tournaments/${encodeURIComponent(t)}/competitions/${encodeURIComponent(c)}/register`, { method: "POST", token, body, what: "Inscripción al torneo" });
-}
-async function unregisterCompetition(token, t, c, dependentIdentification) {
-  await call(`/tournaments/${encodeURIComponent(t)}/competitions/${encodeURIComponent(c)}/register`, { method: "DELETE", token, body: dependentIdentification ? { dependentIdentification } : {}, what: "Cancelar inscripción" });
-}
-async function myRegistrations(token) {
-  return arr(await call("/tournaments/my-registrations", { token, what: "Mis inscripciones" }), "registrations");
-}
-async function listPromotions(status) {
-  return arr(await call("/promotions", { query: { status }, what: "Promociones" }), "promotions");
-}
-async function userPromotions(token, userId) {
-  return arr(await call(`/users/${encodeURIComponent(userId)}/promotions`, { token, what: "Mis promociones" }), "promotions");
-}
-async function poolRatingSummary(poolId) {
-  const b = await call(`/ratings/pool/${encodeURIComponent(poolId)}/summary/public`, { what: "Calificaciones" });
-  return b?.data ?? b ?? {};
-}
-
-// src/cefe/auth.ts
-function storedEmail2(profile) {
-  return loadConfig(paths.cefe.config(), profileName(profile)).email;
-}
-function currentSession2(profile) {
-  return loadSession(paths.cefe.sessions(profile));
-}
-function tokenExpiry(token, now = Date.now()) {
-  try {
-    const payload = JSON.parse(Buffer.from(token.split(".")[1] ?? "", "base64url").toString("utf8"));
-    if (typeof payload.exp === "number")
-      return new Date(payload.exp * 1000).toISOString();
-  } catch {}
-  return new Date(now + 12 * 3600000).toISOString();
-}
-var secretRef2 = (email) => ({ service: "cupo-cefe", account: email, envKey: "CEFE_PASSWORD" });
-function knownEmail2(profile) {
-  return process.env.CEFE_EMAIL ?? envFileValue("CEFE_EMAIL") ?? storedEmail2(profile);
-}
-function savedPassword2(email) {
-  return process.env.CEFE_PASSWORD || loadSecret(secretRef2(email))?.value;
-}
-async function resolvePassword2(opts) {
-  if (process.env.CEFE_PASSWORD)
-    return process.env.CEFE_PASSWORD;
-  if (opts.stdin) {
-    const text = readFileSync9(0, "utf8").split(/\r?\n/)[0] ?? "";
-    if (!text)
-      fail("auth/password-required", "No llegó contraseña por stdin.");
-    return text;
-  }
-  if (opts.email) {
-    const saved = loadSecret(secretRef2(opts.email));
-    if (saved)
-      return saved.value;
-  }
-  if (!opts.noInput) {
-    const pw = await promptSecret("Contraseña CEFE Chapinero: ");
-    if (pw)
-      return pw;
-  }
-  return fail("auth/password-required", "Necesito tu contraseña y no hay terminal interactiva.", "Exporta CEFE_PASSWORD, usa --password-stdin, o guárdala una vez con `cupo cefe auth login --save`.");
-}
-function forgetPassword2(email) {
-  return forgetSecret(secretRef2(email));
-}
-function passwordLocation2(email) {
-  return email ? secretLocation(secretRef2(email)) : null;
-}
-function persistSession(profile, email, token, user) {
-  const session = { createdAt: new Date().toISOString(), expiresAt: tokenExpiry(token), email, token, user };
-  saveSession(paths.cefe.sessions(profile), session);
-  saveConfig(paths.cefe.config(), { profiles: { [profileName(profile)]: { email } } });
-  return session;
-}
-async function login3(profile, email, password, opts = {}) {
-  const { token, user } = await login2(email, password);
-  const session = persistSession(profile, email, token, user);
-  if (!opts.save)
-    return session;
-  const saved = saveSecret(secretRef2(email), password);
-  return { ...session, savedTo: saved.detail };
-}
-function logoutLocal2(profile) {
-  clearSession(paths.cefe.sessions(profile));
-}
-async function requireSession(profile) {
-  const s = currentSession2(profile);
-  const expired = Boolean(s?.expiresAt && Date.parse(s.expiresAt) < nowMs());
-  if (s && !expired)
-    return s;
-  const email = s?.email ?? knownEmail2(profile);
-  const password = email ? savedPassword2(email) : undefined;
-  if (email && password)
-    return login3(profile, email, password);
-  if (!s)
-    return fail("auth/required", "No has iniciado sesión en CEFE Chapinero.", "Corre `cupo cefe auth login --email <tu correo>` (con --save no vuelve a pedir la contraseña).");
-  return fail("auth/expired", "La sesión de CEFE Chapinero venció.", "Corre `cupo cefe auth login` de nuevo (con --save no vuelve a pedir la contraseña).");
-}
-
 // src/cli/agent/trust-ladder.ts
 import { createInterface } from "node:readline/promises";
 import { stdin as defaultStdin, stderr as defaultStderr } from "node:process";
@@ -2632,14 +2630,14 @@ async function resolvePool(raw) {
   return fail("not-found/resource", `No encontré la piscina "${raw}".`, `Opciones: ${pools.map((p) => `${p.name} (${p.poolId})`).join(" · ")}`);
 }
 async function cefeLogin(ctx) {
-  const email = str(ctx.args, "email") ?? knownEmail2(ctx.flags.profile);
+  const email = str(ctx.args, "email") ?? knownEmail(ctx.flags.profile);
   if (!email)
     fail("usage/missing-flag", "Falta tu correo.", "Usa --email <correo> (se recuerda para la próxima).");
   const save = ctx.args.save === true;
   if (save && secretBackend() === "none")
     fail("usage/bad-flag", "CUPO_SECRETS=none: guardar la contraseña está deshabilitado.", "Quita CUPO_SECRETS o ponlo en keychain|file.");
-  const password = await resolvePassword2({ stdin: Boolean(ctx.args.passwordStdin), noInput: ctx.flags.noInput, email });
-  const s = await login3(ctx.flags.profile, email, password, { save });
+  const password = await resolvePassword({ stdin: Boolean(ctx.args.passwordStdin), noInput: ctx.flags.noInput, email });
+  const s = await login2(ctx.flags.profile, email, password, { save });
   const missing = profileGaps(s.user);
   return {
     data: { email, expiresAt: s.expiresAt, passwordSaved: save ? s.savedTo ?? null : null, user: { ...s.user, raw: undefined }, missingForBooking: missing },
@@ -2660,9 +2658,9 @@ function profileGaps(u) {
   return m;
 }
 async function cefeStatus(ctx) {
-  const s = currentSession2(ctx.flags.profile);
+  const s = currentSession(ctx.flags.profile);
   if (!s)
-    return { data: { loggedIn: false, email: storedEmail2(ctx.flags.profile) ?? null }, human: () => `${warn("○")} Sin sesión CEFE. Corre ${bold("cupo cefe auth login --email <correo>")}`, nextSteps: [{ command: "cupo cefe auth login --email <correo>", description: "iniciar sesión" }] };
+    return { data: { loggedIn: false, email: storedEmail(ctx.flags.profile) ?? null }, human: () => `${warn("○")} Sin sesión CEFE. Corre ${bold("cupo cefe auth login --email <correo>")}`, nextSteps: [{ command: "cupo cefe auth login --email <correo>", description: "iniciar sesión" }] };
   let user = null;
   let liveCheck = "ok";
   try {
@@ -2672,15 +2670,15 @@ async function cefeStatus(ctx) {
     liveCheck = e instanceof Error ? e.message : String(e);
   }
   return {
-    data: { loggedIn: user !== null, email: s.email, expiresAt: s.expiresAt, passwordStored: passwordLocation2(s.email), liveCheck, user: user ? { ...user, raw: undefined } : null },
+    data: { loggedIn: user !== null, email: s.email, expiresAt: s.expiresAt, passwordStored: passwordLocation(s.email), liveCheck, user: user ? { ...user, raw: undefined } : null },
     human: () => user ? `${ok("●")} Sesión CEFE activa: ${bold(s.email)} (${user.name})
   ${muted(`Vence: ${s.expiresAt} · créditos ${user.credits} · reservas disponibles ${user.reservasDisponibles}`)}` : `${danger("●")} Sesión guardada pero no válida: ${liveCheck}`
   };
 }
 async function cefeLogout(ctx) {
-  const email = currentSession2(ctx.flags.profile)?.email ?? knownEmail2(ctx.flags.profile);
-  logoutLocal2(ctx.flags.profile);
-  const forgotten = ctx.args.forget === true && email ? forgetPassword2(email) : null;
+  const email = currentSession(ctx.flags.profile)?.email ?? knownEmail(ctx.flags.profile);
+  logoutLocal(ctx.flags.profile);
+  const forgotten = ctx.args.forget === true && email ? forgetPassword(email) : null;
   const forgot = Boolean(forgotten && (forgotten.file || forgotten.keychain));
   return { data: { loggedOut: true, passwordForgotten: forgot }, human: () => `${ok("✓")} Sesión CEFE cerrada (token local borrado; el servidor no tiene logout).${forgot ? " Contraseña guardada eliminada." : ""}` };
 }
@@ -2688,7 +2686,7 @@ async function cefeRegister(ctx) {
   const body = {
     name: requireStr(ctx.args, "name"),
     email: requireStr(ctx.args, "email"),
-    password: await resolvePassword2({ stdin: Boolean(ctx.args.passwordStdin), noInput: ctx.flags.noInput }),
+    password: await resolvePassword({ stdin: Boolean(ctx.args.passwordStdin), noInput: ctx.flags.noInput }),
     phone: requireStr(ctx.args, "phone"),
     identification: requireStr(ctx.args, "document"),
     documentType: str(ctx.args, "documentType") ?? "CC",
@@ -3198,7 +3196,7 @@ async function cefeTournamentUnregister(ctx) {
 }
 async function cefePromoList(ctx) {
   const list = await listPromotions(str(ctx.args, "status"));
-  const s = currentSession2(ctx.flags.profile);
+  const s = currentSession(ctx.flags.profile);
   const mine = s ? await userPromotions(s.token, s.user.userId).catch(() => []) : [];
   return {
     data: { promotions: list, mine },
@@ -3967,7 +3965,8 @@ async function find(ctx) {
   await Promise.all(providers.map(async (p) => {
     try {
       if (p.id === "idrd") {
-        const r = await slotFind({ ...ctx, args: { ...ctx.args, _: [], sport, date, from: String(Math.floor(from / 60)), to: String(Math.ceil(to / 60)), locality } });
+        const window = { ...str(ctx.args, "from") ? { from: String(Math.floor(from / 60)) } : {}, ...str(ctx.args, "to") ? { to: String(Math.min(23, Math.ceil(to / 60))) } : {} };
+        const r = await slotFind({ ...ctx, args: { ...ctx.args, _: [], sport, date, from: undefined, to: undefined, ...window, locality } });
         scanned.idrd = r.data.scanned;
         for (const x of r.data.results) {
           const lane = x.lane ? ` --lane ${x.lane.id}` : "";
@@ -3987,7 +3986,7 @@ async function find(ctx) {
           scanned.cefe = 0;
           return;
         }
-        const r = await cefeSlotFind({ ...ctx, args: { ...ctx.args, _: [], date, from: hm(from), to: hm(to) } });
+        const r = await cefeSlotFind({ ...ctx, args: { ...ctx.args, _: [], date, from: str(ctx.args, "from") ? hm(from) : undefined, to: str(ctx.args, "to") ? hm(Math.min(to, 23 * 60 + 59)) : undefined } });
         scanned.cefe = r.data.scanned;
         for (const x of r.data.results) {
           hits.push({
@@ -4051,8 +4050,8 @@ async function book(ctx) {
   return cefeBookingCreate({ ...ctx, args });
 }
 async function providers(ctx) {
-  const idrd = currentSession(ctx.flags.profile);
-  const cefe = currentSession2(ctx.flags.profile);
+  const idrd = currentSession2(ctx.flags.profile);
+  const cefe = currentSession(ctx.flags.profile);
   const data = PROVIDERS.map((p) => ({
     ...p,
     loggedIn: p.id === "idrd" ? Boolean(idrd) : Boolean(cefe),
@@ -4078,7 +4077,7 @@ ${dim("Buscar en todos: cupo find --sport pool --date sab · Reservar: cupo book
 // package.json
 var package_default = {
   name: "cupo",
-  version: "0.3.0",
+  version: "0.4.0",
   description: "Consigue cupo para hacer deporte en Bogotá desde la terminal: canchas, piscinas, asadores, gimnasios, coliseos y cursos del IDRD y del CEFE Chapinero. CLI agent-first, no oficial.",
   type: "module",
   private: true,
@@ -4132,14 +4131,14 @@ var package_default = {
 var VERSION = package_default.version;
 async function authLogin(ctx) {
   const profile = ctx.flags.profile;
-  const email = str(ctx.args, "email") ?? knownEmail(profile);
+  const email = str(ctx.args, "email") ?? knownEmail2(profile);
   if (!email)
     fail("usage/missing-flag", "Falta tu correo.", "Usa --email <correo> (se recuerda para la próxima).");
   const save = ctx.args.save === true;
   if (save && secretBackend() === "none")
     fail("usage/bad-flag", "CUPO_SECRETS=none: guardar la contraseña está deshabilitado.", "Quita CUPO_SECRETS o ponlo en keychain|file.");
-  const password = await resolvePassword({ stdin: Boolean(ctx.args.passwordStdin), noInput: ctx.flags.noInput, email });
-  const session = await login(profile, email, password, { save });
+  const password = await resolvePassword2({ stdin: Boolean(ctx.args.passwordStdin), noInput: ctx.flags.noInput, email });
+  const session = await login3(profile, email, password, { save });
   const user = await me(session.accessToken).catch(() => null);
   const data = { email, expiresAt: session.expiresAt, refreshable: Boolean(session.refreshToken), passwordSaved: save ? session.savedTo ?? null : null, user };
   return {
@@ -4151,10 +4150,10 @@ async function authLogin(ctx) {
   };
 }
 async function authStatus(ctx) {
-  const s = currentSession(ctx.flags.profile);
+  const s = currentSession2(ctx.flags.profile);
   if (!s) {
     return {
-      data: { loggedIn: false, email: storedEmail(ctx.flags.profile) ?? null },
+      data: { loggedIn: false, email: storedEmail2(ctx.flags.profile) ?? null },
       human: () => `${warn("○")} Sin sesión. Corre ${bold("cupo idrd auth login --email <correo>")}`,
       nextSteps: [{ command: "cupo idrd auth login --email <correo>", description: "iniciar sesión" }]
     };
@@ -4169,7 +4168,7 @@ async function authStatus(ctx) {
   } catch (e) {
     liveCheck = e instanceof Error ? e.message : String(e);
   }
-  const passwordStored = passwordLocation(s.email);
+  const passwordStored = passwordLocation2(s.email);
   const data = { loggedIn: user !== null, email: s.email, expiresAt: s.expiresAt, expired, refreshable: Boolean(s.refreshToken), passwordStored, liveCheck, user };
   return {
     data,
@@ -4178,14 +4177,14 @@ async function authStatus(ctx) {
   };
 }
 async function authLogout(ctx) {
-  const s = currentSession(ctx.flags.profile);
+  const s = currentSession2(ctx.flags.profile);
   if (s)
     await logout(s.accessToken).catch(() => {
       return;
     });
-  logoutLocal(ctx.flags.profile);
-  const email = s?.email ?? knownEmail(ctx.flags.profile);
-  const forgotten = ctx.args.forget === true && email ? forgetPassword(email) : null;
+  logoutLocal2(ctx.flags.profile);
+  const email = s?.email ?? knownEmail2(ctx.flags.profile);
+  const forgotten = ctx.args.forget === true && email ? forgetPassword2(email) : null;
   const forgot = Boolean(forgotten && (forgotten.file || forgotten.keychain));
   return { data: { loggedOut: true, passwordForgotten: forgot }, human: () => `${ok("✓")} Sesión cerrada y token local borrado.${forgot ? " Contraseña guardada eliminada." : ""}` };
 }
@@ -4193,15 +4192,29 @@ async function bookingList(ctx) {
   const { token } = await accessToken(ctx.flags.profile);
   const remote = await listBookings(token);
   const local = localBookings(ctx.flags.profile).map(({ raw, ...rest }) => rest);
-  const data = { remote, local };
+  const remoteIds = new Set(remote.map((r2) => String(r2.id)));
+  const localStatus = (b) => {
+    if (remoteIds.has(String(b.bookingId)))
+      return { status: "pagada", detail: "confirmada en el portal" };
+    const hold = b.holdUntil ? Date.parse(`${String(b.holdUntil).replace(" ", "T")}-05:00`) : NaN;
+    if (Number.isFinite(hold) && hold < nowMs())
+      return { status: "vencida", detail: `la retención venció el ${String(b.holdUntil).slice(0, 16)}; vuelve a reservar` };
+    return { status: "pendiente", detail: `paga antes de las ${String(b.holdUntil ?? "").slice(11, 16)}: cupo idrd pay pse ${b.bookingId} --bank <código> --yes` };
+  };
+  const data = { remote, local: local.map((b) => ({ ...b, ...localStatus(b) })) };
+  const r = (x, k) => x[k] === null || x[k] === undefined ? "" : String(x[k]);
+  const hhmm2 = (t) => t.slice(0, 5);
   return {
     data,
     human: () => [
       bold(`Reservas en el portal: ${remote.length}`),
-      ...remote.slice(0, 20).map((r) => `  • ${JSON.stringify(r).slice(0, 140)}`),
+      ...remote.length ? [table(["Reserva", "Fecha", "Hora", "Espacio", "Parque", "Valor", "Pago"], remote.slice(0, 30).map((x) => {
+        const o = x;
+        return [r(o, "id"), r(o, "date"), `${hhmm2(r(o, "start_hour"))}–${hhmm2(r(o, "final_hour"))}`, r(o, "name"), r(o, "park"), r(o, "total_format").trim() || r(o, "total"), r(o, "status_bank") === "OK" ? ok("pagado") : r(o, "status_bank") || muted("—")];
+      }), [8, 10, 11, 34, 28, 14, 10])] : [muted("  ninguna")],
       "",
       bold(`Creadas desde este equipo: ${local.length}`),
-      ...local.map((b) => `  • ${b.bookingId}  cancha ${b.courtId}  ${b.date} ${b.startHour}–${b.finalHour}  ${b.free ? ok("gratis") : `$${b.amount}`}`)
+      ...data.local.map((b) => `  • ${b.bookingId}  cancha ${b.courtId}  ${b.date} ${b.startHour}–${b.finalHour}  $${b.amount}  ${b.status === "pagada" ? ok(`✓ ${b.detail}`) : b.status === "vencida" ? muted(`○ ${b.detail}`) : warn(`! ${b.detail}`)}`)
     ].join(`
 `)
   };
@@ -4212,7 +4225,7 @@ async function payPending(ctx) {
   return {
     data: items,
     human: () => items.length === 0 ? `${ok("✓")} No tienes pagos pendientes.` : `${bold(`Pagos pendientes: ${items.length}`)}
-${items.map((i) => `  • ${JSON.stringify(i).slice(0, 160)}`).join(`
+${items.map((i) => `  • ${scalarLine(i)}`).join(`
 `)}`,
     nextSteps: items.length ? [{ command: "cupo idrd pay pse <bookingId> --bank <código> --yes", description: "pagar una reserva creada desde este equipo" }] : []
   };
@@ -4222,10 +4235,25 @@ async function payHistory(ctx) {
   const items = await paymentHistory(token);
   return {
     data: items,
-    human: () => items.length === 0 ? "Sin pagos registrados." : `${bold(`Pagos: ${items.length}`)}
-${items.slice(0, 50).map((i) => `  • ${JSON.stringify(i).slice(0, 160)}`).join(`
-`)}`
+    human: () => {
+      if (items.length === 0)
+        return "Sin pagos registrados.";
+      const g = (x, k) => {
+        const v = x[k];
+        return v === null || v === undefined ? "" : String(v);
+      };
+      const status = (s) => s === "APROBADO" ? ok(s) : s === "FALLIDO" || s === "RECHAZADO" ? danger(s) : warn(s || "—");
+      return `${bold(`Pagos: ${items.length}`)}
+${table(["Fecha", "Concepto", "Valor", "Estado", "Reserva", "Código de pago"], items.slice(0, 50).map((i) => [(g(i, "payment_at") || g(i, "created_at")).slice(0, 16), g(i, "concept").replace(/^RESERVA /, ""), g(i, "total_format").trim() || g(i, "total"), status(g(i, "status")), g(i, "booking_id"), g(i, "payment_code")]), [16, 44, 16, 10, 8, 36])}
+${dim("Comprobante de un pago aprobado: https://portalciudadano.idrd.gov.co/app/pagos/comprobante/<código de pago>")}`;
+    },
+    nextSteps: items[0] && items[0].payment_code ? [{ command: `cupo idrd pay status ${String(items[0].payment_code)}`, description: "detalle del pago más reciente" }] : []
   };
+}
+function scalarLine(x) {
+  if (!x || typeof x !== "object")
+    return String(x);
+  return Object.entries(x).filter(([, v]) => v !== null && v !== undefined && typeof v !== "object").slice(0, 8).map(([k, v]) => `${muted(`${k}:`)} ${String(v)}`).join("  ");
 }
 async function doctor(ctx) {
   const checks = [
@@ -4245,11 +4273,11 @@ async function doctor(ctx) {
       return { name: "cefe-publico", ok: pools.length > 0, detail: `${pools.length} piscinas · ${Date.now() - t0} ms` };
     },
     async () => {
-      const s = currentSession2(ctx.flags.profile);
+      const s = currentSession(ctx.flags.profile);
       return { name: "cefe-sesion", ok: true, detail: s ? `${s.email} · vence ${s.expiresAt}` : "sin sesión (solo lectura disponible)" };
     },
     async () => {
-      const s = currentSession(ctx.flags.profile);
+      const s = currentSession2(ctx.flags.profile);
       if (!s)
         return { name: "idrd-sesion", ok: true, detail: "sin sesión (solo lectura disponible)" };
       const { token, refreshed } = await accessToken(ctx.flags.profile);
@@ -4257,8 +4285,8 @@ async function doctor(ctx) {
       return { name: "idrd-sesion", ok: true, detail: `${u.email} · vence ${s.expiresAt}${refreshed ? " · renovada" : ""}` };
     },
     async () => {
-      const email = knownEmail(ctx.flags.profile);
-      const where = passwordLocation(email);
+      const email = knownEmail2(ctx.flags.profile);
+      const where = passwordLocation2(email);
       const insecure = envFileInsecure();
       return { name: "credenciales", ok: !insecure, detail: insecure ? `${envFilePath()} es legible por otros usuarios: chmod 600` : where ? `IDRD: contraseña guardada en ${where === "keychain" ? "el Llavero" : envFilePath()} (sesión se renueva sola)` : `IDRD: sin contraseña guardada (almacén: ${secretBackend()}); guárdala con \`cupo idrd auth login --save\`` };
     },
@@ -4310,19 +4338,55 @@ async function schema() {
   };
   return { data, human: () => JSON.stringify(data, null, 2) };
 }
-function helpText() {
-  const lines = [bold("cupo") + dim(" — consigue cupo para hacer deporte en Bogotá (IDRD + CEFE Chapinero), no oficial"), "", bold("Comandos:")];
+var GROUPS = [["cupo", "El job (todos los proveedores)"], ["idrd", "IDRD · Portal Ciudadano"], ["cefe", "CEFE Chapinero"]];
+function helpText(only) {
+  const lines = [bold(only ? `cupo ${only}` : "cupo") + dim(only ? ` — ${GROUPS.find(([g]) => g === only)[1]} · parte de cupo` : " — consigue cupo para hacer deporte en Bogotá (IDRD + CEFE Chapinero), no oficial"), "", bold("Comandos:")];
   const w = Math.max(...COMMANDS.map((c) => c.name.length)) + 1;
-  const groups = [["cupo", "El job (todos los proveedores)"], ["idrd", "IDRD · Portal Ciudadano"], ["cefe", "CEFE Chapinero"]];
+  const groups = only ? GROUPS.filter(([g]) => g === only) : GROUPS;
   for (const [g, title] of groups) {
     lines.push("", dim(`# ${title}`));
     for (const c of COMMANDS.filter((x) => providerOf(x.name) === g))
       lines.push(`  ${c.name.padEnd(w)} ${c.summary}${c.trust === "T3" ? warn("  [irreversible]") : ""}`);
   }
   lines.push("", bold("Globales:"), ...GLOBAL_FLAGS.map((f) => `  ${f.flag.padEnd(20)} ${f.description}`));
-  lines.push("", dim("Detalle de un comando: idrd <comando> --help · Contrato para agentes: cupo schema"));
+  lines.push("", dim(`Detalle de un comando: cupo ${only ?? "idrd"} <comando> --help · Contrato para agentes: cupo schema${only ? " · Todo: cupo --help" : ""}`));
   return lines.join(`
 `);
+}
+function welcomeText(profile) {
+  const idrd = currentSession2(profile);
+  const cefe = currentSession(profile);
+  const row = (n, cmd, what) => `   ${n}. ${strong(cmd.padEnd(48))} ${muted(what)}`;
+  return [
+    bold("Para empezar:"),
+    row(1, "cupo find --sport tennis --date sab --from 8", "busca cupo en todos los proveedores"),
+    row(2, "cupo book <id de find>", "vista previa; con --yes reserva de verdad"),
+    row(3, "cupo idrd auth login --email tu@correo --save", "entra una vez; la sesión se renueva sola"),
+    "",
+    `  ${muted("Sesión IDRD:")} ${idrd ? ok(idrd.email) : muted("sin sesión")}   ${muted("CEFE Chapinero:")} ${cefe ? ok(cefe.email) : muted("sin sesión")}`,
+    `  ${muted("Todos los comandos: cupo --help · Por proveedor: cupo idrd --help, cupo cefe --help · Para agentes: cupo schema")}`
+  ].join(`
+`);
+}
+function suggestCommands(words, max = 3) {
+  const typed = words.slice(0, 3).join(" ").toLowerCase();
+  const dist = (a, b) => {
+    const d = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)]);
+    for (let j = 1;j <= b.length; j++)
+      d[0][j] = j;
+    for (let i = 1;i <= a.length; i++)
+      for (let j = 1;j <= b.length; j++)
+        d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    return d[a.length][b.length];
+  };
+  const typedWords = words.slice(0, 3).map((w) => w.toLowerCase());
+  const wordScore = (w, cw) => cw === w || w.length > 2 && cw.startsWith(w) ? 0 : dist(w, cw);
+  const scored = COMMANDS.map((c) => {
+    const cws = c.name.toLowerCase().split(" ");
+    const score = typedWords.reduce((sum, w) => sum + Math.min(2, ...cws.map((cw) => wordScore(w, cw))), 0);
+    return { name: c.name, score };
+  }).filter((x) => x.score <= Math.max(1, typedWords.length)).sort((a, b) => a.score - b.score || a.name.length - b.name.length);
+  return scored.slice(0, max).map((x) => x.name);
 }
 function commandHelp(name) {
   const c = COMMANDS.find((x) => x.name === name);
@@ -4339,6 +4403,77 @@ function commandHelp(name) {
   ].join(`
 `);
 }
+
+// src/core/update.ts
+import { spawn as spawn2 } from "node:child_process";
+import { existsSync as existsSync9, mkdirSync as mkdirSync5, readFileSync as readFileSync10, writeFileSync as writeFileSync3 } from "node:fs";
+import { dirname as dirname2, join as join10, resolve } from "node:path";
+var UPDATE_URL = "https://raw.githubusercontent.com/huayaney-exe/cupo-ciudadano-cli/main/package.json";
+var UPDATE_TTL_MS = 24 * 3600000;
+function updateCachePath() {
+  return join10(appHome(), "update-check.json");
+}
+function updateChecksDisabled() {
+  return Boolean(process.env.CUPO_NO_UPDATE_CHECK || process.env.CI || false);
+}
+function compareVersions(a, b) {
+  const pa = a.replace(/^v/, "").split(/[.-]/).map((x) => Number(x) || 0);
+  const pb = b.replace(/^v/, "").split(/[.-]/).map((x) => Number(x) || 0);
+  for (let i = 0;i < 3; i++)
+    if ((pa[i] ?? 0) !== (pb[i] ?? 0))
+      return (pa[i] ?? 0) - (pb[i] ?? 0);
+  return 0;
+}
+function readUpdateCache() {
+  try {
+    const file = updateCachePath();
+    return existsSync9(file) ? JSON.parse(readFileSync10(file, "utf8")) : null;
+  } catch {
+    return null;
+  }
+}
+function writeUpdateCache(cache) {
+  mkdirSync5(appHome(), { recursive: true, mode: 448 });
+  writeFileSync3(updateCachePath(), `${JSON.stringify(cache)}
+`, { mode: 384 });
+}
+function repoDir(entry = process.argv[1] ?? "") {
+  return resolve(dirname2(entry), "..");
+}
+function updateNotice(current, cache = readUpdateCache(), repo = repoDir()) {
+  if (!cache?.latest || compareVersions(cache.latest, current) <= 0)
+    return null;
+  return `↑ cupo ${cache.latest} disponible (tienes ${current}). Actualiza: git -C ${repo} pull`;
+}
+function scheduleUpdateCheck(current, entry = process.argv[1]) {
+  if (updateChecksDisabled() || !entry)
+    return;
+  const cache = readUpdateCache();
+  if (cache && cache.current === current && Date.now() - Date.parse(cache.checkedAt) < UPDATE_TTL_MS)
+    return;
+  try {
+    const child = spawn2(process.execPath, [entry, "__update-check"], { detached: true, stdio: "ignore", env: { ...process.env, CUPO_NO_UPDATE_CHECK: "" } });
+    child.unref();
+  } catch {}
+}
+async function runUpdateCheck(current, url = UPDATE_URL) {
+  let cache = { checkedAt: new Date().toISOString(), current, latest: null };
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(6000), headers: { accept: "application/json", "user-agent": `cupo/${current}` } });
+    if (!res.ok)
+      throw new Error(`HTTP ${res.status}`);
+    const pkg = await res.json();
+    cache.latest = typeof pkg.version === "string" ? pkg.version : null;
+  } catch (e) {
+    cache = { ...cache, error: e instanceof Error ? e.message : String(e) };
+  }
+  writeUpdateCache(cache);
+  return cache;
+}
+
+// src/cli.ts
+import { existsSync as existsSync10, mkdirSync as mkdirSync6, writeFileSync as writeFileSync4 } from "node:fs";
+import { join as join11 } from "node:path";
 
 // src/commands/activities.ts
 var fold3 = (s) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
@@ -4784,6 +4919,42 @@ async function main(argv) {
 `);
     return EXIT.ok;
   }
+  if (words[0] === "__update-check") {
+    await runUpdateCheck(VERSION);
+    return EXIT.ok;
+  }
+  const human = !isJson(flags);
+  if (human && !flags.quiet)
+    scheduleUpdateCheck(VERSION);
+  const welcomed = join11(appHome(), "welcomed");
+  if (human && !flags.quiet && !args.noBanner && !process.env.CUPO_NO_BANNER && words.length > 0 && !existsSync10(welcomed)) {
+    printBanner({ name: "cupo", version: VERSION, tagline: "Cupo para hacer deporte en Bogotá · IDRD + CEFE Chapinero · no oficial", gradient: ["#00B4D8", "#2E7D32"] });
+    process.stderr.write(`${welcomeText(flags.profile)}
+
+`);
+    try {
+      mkdirSync6(appHome(), { recursive: true, mode: 448 });
+      writeFileSync4(welcomed, `${new Date().toISOString()}
+`);
+    } catch {}
+  }
+  const notice = () => {
+    const n = human && !flags.quiet ? updateNotice(VERSION) : null;
+    if (n)
+      process.stderr.write(`
+${n}
+`);
+  };
+  if (words.length === 1 && (words[0] === "idrd" || words[0] === "cefe")) {
+    const p = words[0];
+    if (isJson(flags))
+      process.stdout.write(`${JSON.stringify({ ok: true, schemaVersion: 1, command: p, data: { provider: p, commands: COMMANDS.filter((c) => providerOf(c.name) === p) }, nextSteps: [] })}
+`);
+    else
+      process.stdout.write(`${helpText(p)}
+`);
+    return EXIT.ok;
+  }
   if (words.length === 0 || words[0] === "help") {
     const target = words[0] === "help" ? findCommand(words.slice(1)) : null;
     if (target) {
@@ -4801,18 +4972,25 @@ async function main(argv) {
       return EXIT.usage;
     }
     if (!args.noBanner)
-      printBanner({ name: "cupo", version: VERSION, tagline: "Cupo para hacer deporte en Bogotá", gradient: ["#00B4D8", "#2E7D32"] });
-    process.stderr.write(`${helpText()}
+      printBanner({ name: "cupo", version: VERSION, tagline: "Cupo para hacer deporte en Bogotá · IDRD + CEFE Chapinero · no oficial", gradient: ["#00B4D8", "#2E7D32"] });
+    process.stderr.write(`${welcomeText(flags.profile)}
 `);
+    try {
+      mkdirSync6(appHome(), { recursive: true, mode: 448 });
+      writeFileSync4(welcomed, `${new Date().toISOString()}
+`);
+    } catch {}
+    notice();
     return EXIT.ok;
   }
   const found = findCommand(words);
   const commandName = found?.spec.name ?? words.join(" ");
   if (!found) {
+    const close = suggestCommands(words);
     const err = new AppError("usage/unknown-command", {
       name: "UnknownCommand",
       human: `Comando desconocido: ${words.join(" ")}`,
-      hint: `Disponibles: ${COMMANDS.map((c) => c.name).join(", ")}`
+      hint: close.length ? `¿Quisiste decir: ${close.map((c) => `cupo ${c}`).join(" · ")}? Todos: cupo --help` : "Todos los comandos: cupo --help · Contrato para agentes: cupo schema"
     });
     emitError(commandName, err, flags);
     return EXIT.usage;
@@ -4830,6 +5008,7 @@ async function main(argv) {
     const handler = HANDLERS[found.spec.name];
     const result = await handler({ args: { ...args, _: found.rest }, flags });
     emitResult(found.spec.name, result, flags);
+    notice();
     const exit = result.meta?.exitCode;
     return typeof exit === "number" ? exit : EXIT.ok;
   } catch (e) {

@@ -58,7 +58,9 @@ export async function find(ctx: Ctx) {
   await Promise.all(providers.map(async (p) => {
     try {
       if (p.id === "idrd") {
-        const r = await slotFind({ ...ctx, args: { ...ctx.args, _: [], sport, date, from: String(Math.floor(from / 60)), to: String(Math.ceil(to / 60)), locality } });
+        // Forward the window only when the human gave one: each provider has its own "whole day" default and rejects 24:00.
+        const window = { ...(str(ctx.args, "from") ? { from: String(Math.floor(from / 60)) } : {}), ...(str(ctx.args, "to") ? { to: String(Math.min(23, Math.ceil(to / 60))) } : {}) };
+        const r = await slotFind({ ...ctx, args: { ...ctx.args, _: [], sport, date, from: undefined, to: undefined, ...window, locality } });
         scanned.idrd = r.data.scanned;
         for (const x of r.data.results) {
           const lane = x.lane ? ` --lane ${x.lane.id}` : "";
@@ -71,7 +73,7 @@ export async function find(ctx: Ctx) {
         }
       } else {
         if (locality && !"chapinero cefe centro felicidad".includes(locality.toLowerCase())) { scanned.cefe = 0; return; }
-        const r = await cefeSlotFind({ ...ctx, args: { ...ctx.args, _: [], date, from: hm(from), to: hm(to) } });
+        const r = await cefeSlotFind({ ...ctx, args: { ...ctx.args, _: [], date, from: str(ctx.args, "from") ? hm(from) : undefined, to: str(ctx.args, "to") ? hm(Math.min(to, 23 * 60 + 59)) : undefined } });
         scanned.cefe = r.data.scanned;
         for (const x of r.data.results) {
           hits.push({

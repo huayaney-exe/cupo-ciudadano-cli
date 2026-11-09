@@ -91,6 +91,7 @@ cupo idrd booking create 11537 --date 2026-11-06 --hour 16 --yes --confirm 11537
 
 **Errors to handle**
 - `auth/required`, `auth/expired` (exit 3) → ask the human to run `cupo idrd auth login --save` in their terminal (once; afterwards the session renews itself). `auth status` reports `passwordStored`.
+- `usage/unknown-command` (exit 2) → `hint` lists the closest command names; `cupo idrd --json` / `cupo cefe --json` return that provider's command specs; `cupo schema` the whole contract.
 - `rule/violation` (exit 2) → explain the rule (max 2 h/day, 4 h/week, 24 h advance, only the published week, Mondays open at 9 am).
 - `slot/unavailable` (exit 5) → re-run `cupo idrd slot list` and offer alternatives.
 - `approval/confirm-mismatch` → the intent changed; re-run the preview and use its new intent.

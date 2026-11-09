@@ -52,7 +52,7 @@ Quieres nadar el sábado temprano, jugar tenis el viernes al salir del trabajo, 
 | Resérvalo | `cupo book <id>` | Enruta al proveedor correcto por el id (`idrd:…` o `cefe:…`). Primero muestra una vista previa. |
 | ¿Qué cubre cada sistema? | `cupo providers` | Mapa de proveedores, deportes, y si ya tienes sesión. |
 
-Todo lo específico de cada sistema sigue disponible bajo su prefijo: `cupo idrd …` y `cupo cefe …`.
+Todo lo específico de cada sistema sigue disponible bajo su prefijo: `cupo idrd …` y `cupo cefe …`. `cupo idrd --help` y `cupo cefe --help` listan solo los comandos de ese proveedor, y si escribes mal un comando el CLI te propone los más parecidos.
 
 ## Requisitos e instalación
 
@@ -67,7 +67,9 @@ npm link
 cupo doctor
 ```
 
-`npm link` deja `cupo` disponible en cualquier carpeta (y `idrd`, el nombre anterior, como alias). `cupo doctor` revisa Node, la conexión con ambos proveedores y tus sesiones. Actualizar: `git pull` en la carpeta del repo. Desinstalar: `npm unlink -g cupo`.
+`npm link` deja `cupo` disponible en cualquier carpeta (y `idrd`, el nombre anterior, como alias). La primera vez que corres `cupo` ves un banner con los tres comandos del job; `cupo doctor` revisa Node, la conexión con ambos proveedores, tus sesiones y tus credenciales guardadas.
+
+**Actualizar:** `git pull` en la carpeta del repo. Una vez al día, en segundo plano, el CLI compara su versión con la publicada en GitHub y, si hay una nueva, lo dice en una línea al final del comando (solo en modo humano, nunca en JSON). `CUPO_NO_UPDATE_CHECK=1` lo apaga. **Desinstalar:** `npm unlink -g cupo`.
 
 ## Buscar
 
@@ -169,6 +171,7 @@ Empieza por `cupo schema`: trae `start` (los tres comandos del job), `providers`
   - error: `{ok: false, error: {code, message, hint}}`
 - `nextSteps` siempre son comandos reales y ejecutables; en `cupo find`, cada resultado trae su `bookCommand`.
 - Códigos de salida: `0` ok · `2` uso o regla · `3` falta sesión · `4` no existe · `5` rechazado (falta confirmación, killswitch, sin cupo) · `6` proveedor o red.
+- Un comando mal escrito devuelve `usage/unknown-command` con los nombres más parecidos en `hint`. `cupo idrd --json` y `cupo cefe --json` devuelven los comandos de ese proveedor. El banner de bienvenida y el aviso de versión nueva nunca aparecen en modo JSON.
 - Nunca se queda esperando: si falta algo, falla con un error estructurado. Contraseñas sin terminal: `IDRD_PASSWORD`, `CEFE_PASSWORD`, `--password-stdin`, o la guardada con `auth login --save`.
 - Ante `auth/required` o `auth/expired` (salida 3), pídele a la persona que corra una vez `cupo idrd auth login --save` en su terminal. Después de eso la sesión se renueva sola y el agente no vuelve a toparse con ese error. Nunca pidas la contraseña por chat.
 - El flujo completo (iniciar sesión, buscar, reservar, generar el pago y verificarlo) ya lo ejecutó un agente en vivo contra el IDRD; la persona solo eligió el banco y aprobó el pago. La secuencia está en [Una reserva paga, de punta a punta](#una-reserva-paga-de-punta-a-punta).
@@ -225,8 +228,10 @@ Todo queda en tu equipo, en `~/.cupo/` (puedes cambiar la ubicación con `CUPO_H
 | `bookings/<perfil>/` | Reservas creadas desde este equipo, permisos 0600 |
 | `audit/AAAA-MM-DD.jsonl` | Registro de reservas y pagos, sin tokens |
 | `KILLSWITCH` | Si existe, toda escritura queda bloqueada |
+| `update-check.json` | Última versión publicada vista en GitHub y cuándo se consultó (una vez al día) |
+| `welcomed` | Marca de que ya viste el banner de bienvenida |
 
-Tu contraseña **solo** se guarda si pasas `--save`, y entonces va al Llavero de macOS o a `~/.cupo/env` con permisos 0600; `auth logout --forget` la borra. El CLI no envía datos a ningún servicio distinto del portal del IDRD, salvo una consulta a `api.ipify.org` para obtener tu IP pública, que la pasarela PSE exige al generar un pago.
+Tu contraseña **solo** se guarda si pasas `--save`, y entonces va al Llavero de macOS o a `~/.cupo/env` con permisos 0600; `auth logout --forget` la borra. El CLI no envía datos personales a ningún servicio distinto de los dos portales. Las únicas otras conexiones son una consulta a `api.ipify.org` para obtener tu IP pública, que la pasarela PSE exige al generar un pago, y una lectura diaria del `package.json` publicado en GitHub para avisarte de versiones nuevas (`CUPO_NO_UPDATE_CHECK=1` la apaga).
 
 ## Estado del proyecto
 
