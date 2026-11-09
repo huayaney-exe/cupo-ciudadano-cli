@@ -20,7 +20,7 @@ The job is "consígueme cupo para hacer deporte", not "operate the IDRD portal",
 
 ## Phase 2: command surface
 
-Noun-verb, English verbs agents already know (`list`, `get`, `create`), Spanish human output. Shorthand for the 90% operation: `cupo idrd find` = `cupo cupo idrd slot find`.
+Noun-verb, English verbs agents already know (`list`, `get`, `create`), Spanish human output. Shorthand for the 90% operation: `cupo idrd find` = `cupo idrd slot find`.
 
 | Command | Trust | Auth | Notes |
 |---|---|---|---|
@@ -62,9 +62,15 @@ The damage is real and asymmetric: **the portal has no cancel endpoint** (none i
 - **Killswitch.** `cupo killswitch on` (or `touch ~/.cupo/KILLSWITCH`) blocks every write regardless of flags.
 - **Payment stays human.** The CLI never touches card or bank credentials. For paid bookings it returns the PSE `bank_url`; the human pays at their bank. Free bookings are confirmed through `transferBankFree` automatically as part of the same approved intent (that is what the portal's own UI does).
 - **Web client, not hardcoded.** The portal's OAuth password grant needs its public web client id/secret, which every browser receives in `chunk-common.<hash>.js`. The CLI discovers them from that file at login (`src/idrd/webclient.ts`), caches them for 7 days (0600), re-discovers once on `invalid_client` (rotation), and honors `IDRD_CLIENT_ID`/`IDRD_CLIENT_SECRET`. Nothing is republished in this repo.
-- **Secrets.** Password comes from `IDRD_PASSWORD`, `--password-stdin`, or a no-echo TTY prompt; it is never persisted (contract test greps every file under `CUPO_HOME`). Token stored 0600. Without TTY and without a password source, login fails fast with exit 3 — it never hangs.
+- **Secrets.** Password comes from `IDRD_PASSWORD`, `--password-stdin`, a saved secret, or a no-echo TTY prompt. By default nothing is persisted (contract test greps every file under `CUPO_HOME`). With `auth login --save` (added 2026-11-09 after the live finding that the portal revokes refresh tokens, so every 8 h needed a human) the password goes to the macOS Keychain through `/usr/bin/security` (`security -i` reads the command from stdin so the secret never hits argv) or, elsewhere or with `CUPO_SECRETS=file`, to `~/.cupo/env` (0600). It is saved only after the portal accepted it. `~/.cupo/env` is also read as a user-editable environment file. `accessToken()` then logs in again by itself when the session is past its margin and the refresh grant fails; `cefe requireSession()` does the same. `auth logout --forget` removes it; `CUPO_SECRETS=none` forbids saving. Tests run with `CUPO_SECRETS=file` in a temp home so the suite never touches the developer's Keychain. Token stored 0600. Without TTY and without any password source, login fails fast with exit 3 — it never hangs.
 - **Untrusted text.** Every upstream string goes through `cleanText` (strips ANSI, control and bidi characters, caps length, repairs double-encoded UTF-8) before it reaches an agent.
 - **Real IP only.** PSE requires the payer's public IP. The portal's SPA falls back to a hardcoded IP when lookup fails; this CLI refuses instead of sending an address that is not the user's.
+
+## Phase 2c: the first minute and the thousandth (2026-11-09 audit)
+
+Found by using the CLI as a person would, after the live validation: `cupo find` with no `--to` forwarded an implicit `24`/`24:00` that both providers reject, and the failure was swallowed into `failed[]`, so the headline command returned "Sin cupo" on its defaults (tests always passed a window; now they also run the defaults). `booking list`, `pay history` and `pay pending` printed raw JSON in human mode; they are tables now, and local bookings carry a `status` (`pagada` when the portal lists them, `vencida` when the 15-minute hold passed, `pendiente` with the exact `pay pse` command otherwise). `cupo idrd --help` was an unknown command although the README advertised it; `cupo idrd`/`cupo cefe` now print that provider's commands (JSON: the specs). Unknown commands suggest the closest names by word distance instead of dumping sixty names.
+
+Bare `cupo` is a welcome screen, Gemini-CLI style: gradient wordmark, the three commands of the job, session state, where the full help is. The same screen appears once on the first human command on a machine (marker `~/.cupo/welcomed`; `CUPO_NO_BANNER=1` or `--no-banner` suppress it) because an `npm postinstall` banner is invisible under npm ≥ 7, which hides script output. Update check as update-notifier does it: the command only reads `~/.cupo/update-check.json` and prints one stderr line when it names a newer version; a detached `cupo __update-check` (hidden from help and schema) refreshes it from the published `package.json` at most daily. Never in JSON mode, `--quiet`, CI or with `CUPO_NO_UPDATE_CHECK=1`; latency never waits on the network.
 
 ## Phase 3: cligentic blocks
 
@@ -129,9 +135,10 @@ A second, unrelated target in the same binary: cefechapinero.com (Next.js SPA ov
 
 **CEFE Chapinero, verified live (anonymous), 2026-11-04:** pools, pool detail, schedule config, pool-slots occupancy, courses, course availability, promotions, public rating summary; three-word dispatch and aliases; 403 mapping. **CEFE, not exercised live:** everything behind login (login response, reservations list/create/cancel, user profile, enrolments, class bookings, tournaments), all read from the SPA's service classes and covered by `tests/contract/cefe.test.ts` against a mock.
 
-**Implemented from the bundle, not exercised live** (no credentials available during the autonomous build, and the owner chose not to create a real booking):
-- `POST /api/parks/schedules/{id}/payment` response shape (fields taken from the component that consumes it).
-- `transferBankFree` / `transferBank` / `status` responses.
+**Exercised live with the owner's account (2026-11-06 and 2026-11-09), driven by an agent through the JSON mode:** `booking create` for a paid tennis court (`POST /api/parks/schedules/{id}/payment`: response shape confirmed, `booking_id`, `amount`, 15-minute hold), `pay pse` (`transferBank` → `payment` code + `bank_url`, Bancolombia), `pay status` by payment code (`Aprobado`), `pay history` (one `APROBADO`; two `FALLIDO`/`NOT_AUTHORIZED` on the 9th, rejected by the bank, no charge, hold expired), `pay pending`, `booking list` (the paid booking appears remotely). The human only chose the bank and approved the payment at the bank.
+
+**Implemented from the bundle, still not exercised live:**
+- `transferBankFree` (free confirmation) response.
 - The refresh grant (standard Passport; the SPA never uses it).
 - Booking for non-tennis scenarios (synthetic fields may route through the legacy SIM system).
 - The 4 h/week cap across the whole park system is not checked client-side (needs the shape of a non-empty `bookings` response).
@@ -139,4 +146,4 @@ A second, unrelated target in the same binary: cefechapinero.com (Next.js SPA ov
 - Activities: `/api/profiles/list` and `/api/profiles/subscriptions` shapes, the subscribe body, and the DELETE.
 - `/api/citizen-portal/pending-to-pay` and `/api/citizen-portal/payments` shapes (returned raw).
 
-All of these are covered by contract tests against a mock that mirrors the observed shapes. The first real booking will confirm them; see `README.md` → "Primera reserva real".
+All of these are covered by contract tests against a mock that mirrors the observed shapes.

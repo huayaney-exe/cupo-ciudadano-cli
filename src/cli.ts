@@ -3,7 +3,12 @@ import { parseGlobalFlags, type GlobalFlags } from "./cli/foundation/global-flag
 import { parseArgs } from "./core/args.js";
 import { AppError, EXIT, exitCodeFor, toAppError } from "./core/errors.js";
 import { emitError, emitResult, isJson } from "./core/output.js";
-import { authLogin, authLogout, authStatus, bookingList, commandHelp, doctor, helpText, killswitch, payHistory, payPending, schema, VERSION } from "./commands/account.js";
+import { authLogin, authLogout, authStatus, bookingList, commandHelp, doctor, helpText, killswitch, payHistory, payPending, schema, suggestCommands, VERSION, welcomeText } from "./commands/account.js";
+import { runUpdateCheck, scheduleUpdateCheck, updateNotice } from "./core/update.js";
+import { providerOf } from "./registry.js";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { appHome } from "./core/paths.js";
 import { activityCategories, activityGet, activityList, activityMine, activityPrograms, activityStages, activitySubscribe, activityUnsubscribe, profileList } from "./commands/activities.js";
 import { gymActivate, gymActive, gymAvailability, gymBuy, gymQuote, gymStatus } from "./commands/gym.js";
 import * as cefe from "./commands/cefe.js";
@@ -95,6 +100,28 @@ export async function main(argv: string[]): Promise<number> {
     process.stdout.write(isJson(flags) ? `${JSON.stringify({ ok: true, version: VERSION })}\n` : `${VERSION}\n`);
     return EXIT.ok;
   }
+  // Detached child spawned by scheduleUpdateCheck(): refresh the version cache and exit. Hidden from help and schema.
+  if (words[0] === "__update-check") {
+    await runUpdateCheck(VERSION);
+    return EXIT.ok;
+  }
+  const human = !isJson(flags);
+  if (human && !flags.quiet) scheduleUpdateCheck(VERSION);
+  // First run on this machine (any install method): the banner and the three commands of the job, once, on stderr.
+  const welcomed = join(appHome(), "welcomed");
+  if (human && !flags.quiet && !args.noBanner && !process.env.CUPO_NO_BANNER && words.length > 0 && !existsSync(welcomed)) {
+    printBanner({ name: "cupo", version: VERSION, tagline: "Cupo para hacer deporte en Bogotá · IDRD + CEFE Chapinero · no oficial", gradient: ["#00B4D8", "#2E7D32"] });
+    process.stderr.write(`${welcomeText(flags.profile)}\n\n`);
+    try { mkdirSync(appHome(), { recursive: true, mode: 0o700 }); writeFileSync(welcomed, `${new Date().toISOString()}\n`); } catch { /* read-only home: show it again next time */ }
+  }
+  const notice = () => { const n = human && !flags.quiet ? updateNotice(VERSION) : null; if (n) process.stderr.write(`\n${n}\n`); };
+  // `cupo idrd`, `cupo cefe`, with or without --help: that provider's commands.
+  if (words.length === 1 && (words[0] === "idrd" || words[0] === "cefe")) {
+    const p = words[0];
+    if (isJson(flags)) process.stdout.write(`${JSON.stringify({ ok: true, schemaVersion: 1, command: p, data: { provider: p, commands: COMMANDS.filter((c) => providerOf(c.name) === p) }, nextSteps: [] })}\n`);
+    else process.stdout.write(`${helpText(p)}\n`);
+    return EXIT.ok;
+  }
   if (words.length === 0 || words[0] === "help") {
     const target = words[0] === "help" ? findCommand(words.slice(1)) : null;
     if (target) {
@@ -111,18 +138,21 @@ export async function main(argv: string[]): Promise<number> {
       emitError("cupo", new AppError("usage/no-command", { name: "NoCommand", human: "Falta el comando.", hint: "Corre `cupo schema` para ver el contrato." }), flags);
       return EXIT.usage;
     }
-    if (!args.noBanner) printBanner({ name: "cupo", version: VERSION, tagline: "Cupo para hacer deporte en Bogotá", gradient: ["#00B4D8", "#2E7D32"] });
-    process.stderr.write(`${helpText()}\n`);
+    if (!args.noBanner) printBanner({ name: "cupo", version: VERSION, tagline: "Cupo para hacer deporte en Bogotá · IDRD + CEFE Chapinero · no oficial", gradient: ["#00B4D8", "#2E7D32"] });
+    process.stderr.write(`${welcomeText(flags.profile)}\n`);
+    try { mkdirSync(appHome(), { recursive: true, mode: 0o700 }); writeFileSync(welcomed, `${new Date().toISOString()}\n`); } catch { /* ignore */ }
+    notice();
     return EXIT.ok;
   }
 
   const found = findCommand(words);
   const commandName = found?.spec.name ?? words.join(" ");
   if (!found) {
+    const close = suggestCommands(words);
     const err = new AppError("usage/unknown-command", {
       name: "UnknownCommand",
       human: `Comando desconocido: ${words.join(" ")}`,
-      hint: `Disponibles: ${COMMANDS.map((c) => c.name).join(", ")}`,
+      hint: close.length ? `¿Quisiste decir: ${close.map((c) => `cupo ${c}`).join(" · ")}? Todos: cupo --help` : "Todos los comandos: cupo --help · Contrato para agentes: cupo schema",
     });
     emitError(commandName, err, flags);
     return EXIT.usage;
@@ -137,6 +167,7 @@ export async function main(argv: string[]): Promise<number> {
     const handler = HANDLERS[found.spec.name]!;
     const result = await handler({ args: { ...args, _: found.rest }, flags });
     emitResult(found.spec.name, result, flags);
+    notice();
     const exit = result.meta?.exitCode;
     return typeof exit === "number" ? exit : EXIT.ok;
   } catch (e) {

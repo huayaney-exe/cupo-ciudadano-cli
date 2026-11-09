@@ -109,6 +109,7 @@ export type Scenario = {
   onSubscribe?: () => void;
   pending?: unknown[];
   payments?: unknown[];
+  bookings?: unknown[];
   /** booking POST answers with the twin adult booking the portal creates for 5–12 year olds */
   adultBooking?: boolean;
 };
@@ -278,6 +279,13 @@ function portalFetch(sc: Scenario, calls: Call[]): FetchLike {
     }
     if (p === "/api/citizen-portal/pending-to-pay") return headers.Authorization ? json(200, { data: sc.pending ?? [] }) : json(401, {});
     if (p === "/api/citizen-portal/payments") return headers.Authorization ? paged(sc.payments ?? []) : json(401, {});
+    if (p.startsWith("/api/payment-gateway/status/")) {
+      const code = decodeURIComponent(p.split("/").pop() ?? "");
+      const hit = (sc.payments ?? []).find((x) => (x as Record<string, unknown>).payment_code === code) as Record<string, unknown> | undefined;
+      // The portal answers HTTP 500 for anything that is not a payment code (observed live with a booking number).
+      if (!hit) return json(500, { message: "Trying to get property of non-object" });
+      return json(200, { data: [{ code_payment: code, amount: "22800.00", currently: "COP", concept: hit.concept, date_payment: hit.payment_at ?? hit.created_at, transaccion_id_pse: "PSE-1", status_bank: hit.status === "APROBADO" ? "OK" : "NOT_AUTHORIZED", status: { id: hit.status === "APROBADO" ? 2 : 5, descripcion: hit.status === "APROBADO" ? "Aprobado" : "Fallido" }, method: { id: 1, Nombre: "pse" } }] });
+    }
     if (p === "/api/parks/tennis-courts") {
       // Laravel paginator, like the real portal: 10 per page unless `per_page` says otherwise.
       const rows = sc.courts ?? COURTS.data;
@@ -307,7 +315,7 @@ function portalFetch(sc: Scenario, calls: Call[]): FetchLike {
       return json(200, { token_type: "Bearer", expires_in: 28800, access_token: "tok-abc", refresh_token: "ref-xyz" });
     }
     if (p === "/api/user") return headers.Authorization ? json(200, { id: 1, name: "Ana Ruiz", email: "a@b.co", is_verified: true, has_profile: true, profile: { document: "123", document_type_id: "CE", name: "Ana", surname: "Ruiz", phone: 300, address: "Cl 1", person_type_id: "N" } }) : json(401, {});
-    if (p === "/api/citizen-portal/bookings") return json(200, { data: [] });
+    if (p === "/api/citizen-portal/bookings") return json(200, { data: sc.bookings ?? [] });
     if (p === "/api/logout") return json(200, {});
     if (p === "/api/payment-gateway/banks") return json(200, { banks: [{ code: "0", name: "A continuación seleccione su banco" }, { code: "1007", name: "BANCOLOMBIA" }] });
     if (p === "/api/payment-gateway/transferBankFree") return sc.transferStatus ? json(sc.transferStatus, { message: "PSE caído" }) : json(200, { data: { payment: "FREE-1" } });
@@ -350,6 +358,10 @@ export async function run(argv: string[], env: Record<string, string | undefined
 export function tempHome(): { dir: string; cleanup: () => void } {
   const dir = mkdtempSync(join(tmpdir(), "idrd-test-"));
   process.env.IDRD_HOME = dir;
+  // Never touch the developer's real Keychain from the suite.
+  process.env.CUPO_SECRETS = "file";
+  process.env.CUPO_NO_UPDATE_CHECK = "1";
+  process.env.CUPO_NO_BANNER = "1";
   return { dir, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
 }
 

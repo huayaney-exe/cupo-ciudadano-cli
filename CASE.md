@@ -32,8 +32,10 @@ Discovered. `surface-recon` ran first (`docs/recon.md`) and the build started
 from it. The contract came from the portal's own bundle: an
 endpoint table in the common chunk, and the booking/payment payloads in lazy
 chunk `5505` (358 lazy chunks downloaded to find it). Auth was verified live
-with the owner's account before the build; the write path was not exercised
-live by the owner's decision (bookings are irreversible).
+with the owner's account before the build; the write path was exercised
+live on 2026-11-06: a paid tennis booking created, paid through PSE and
+verified `Aprobado` by an agent driving the CLI (see `DESIGN.md` → Verified vs
+unverified).
 
 Recon got one thing wrong that the build caught: availability. The first scan
 read `can:true` windows as free; the endpoint stacks reserved windows on top

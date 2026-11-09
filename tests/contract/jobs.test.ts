@@ -32,6 +32,13 @@ describe("the job: cupo find / book / providers", () => {
     const only = await run(["find", "--sport", "pool", "--date", "2026-11-05", "--provider", "idrd", "--json"]);
     expect(only.json.data.providers).toEqual(["idrd"]);
     expect((await run(["find", "--provider", "nope", "--json"])).json.error.code).toBe("usage/bad-arg");
+    // Defaults: no window at all, or only --from. Each provider used to reject the implicit 24:00 and the failure was swallowed into failed[].
+    const whole = await run(["find", "--sport", "pool", "--date", "2026-11-05", "--json"]);
+    expect(whole.json.data.failed).toEqual([]);
+    expect(whole.json.data.window).toEqual({ from: "00:00", to: "24:00" });
+    expect(whole.json.data.results.length).toBeGreaterThan(0);
+    const fromOnly = await run(["find", "--sport", "tennis", "--date", "2026-11-05", "--from", "15", "--json"]);
+    expect(fromOnly.json.data.failed).toEqual([]);
   });
   test("book routes by prefix and normalizes --time/--hour; previews come from the provider", async () => {
     mockAll();
