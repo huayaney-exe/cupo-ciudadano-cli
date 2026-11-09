@@ -60,6 +60,39 @@ describe("readable account lists", () => {
   });
 });
 
+describe("pay status", () => {
+  test("accepts the booking number and resolves the approved payment code from the history", async () => {
+    mockPortal({ payments: [
+      { created_at: "2026-11-09 10:06:17", concept: "RESERVA CANCHA TENIS #3032", status: "FALLIDO", booking_id: "880847", payment_code: "1bd6cbb4" },
+      { created_at: "2026-11-09 10:08:20", concept: "RESERVA CANCHA TENIS #3032", status: "FALLIDO", booking_id: "880847", payment_code: "64d1e7cc" },
+      { created_at: "2026-11-06 16:42:00", payment_at: "2026-11-06 21:43:16", concept: "RESERVA CANCHA TENIS #3032", status: "APROBADO", booking_id: "875972", payment_code: "e4334d5c" },
+    ] });
+    await run(["idrd", "auth", "login", "--email", "a@b.co", "--json"], { IDRD_PASSWORD: "x" });
+    const byBooking = await run(["idrd", "pay", "status", "875972", "--json"]);
+    expect(byBooking.json.data).toMatchObject({ code: "e4334d5c", bookingId: "875972", approved: true, receiptUrl: "https://portalciudadano.idrd.gov.co/app/pagos/comprobante/e4334d5c" });
+    const failed = await run(["idrd", "pay", "status", "880847", "--json"]);
+    expect(failed.json.data).toMatchObject({ code: "64d1e7cc", approved: false, receiptUrl: null });
+    const byCode = await run(["idrd", "pay", "status", "e4334d5c"], { NO_JSON: "1" });
+    expect(byCode.stdout).toContain("Aprobado");
+    expect(byCode.stdout).toContain("comprobante/e4334d5c");
+    expect(byCode.stdout).not.toContain("{");
+    const none = await run(["idrd", "pay", "status", "123", "--json"]);
+    expect(none.json.error.code).toBe("not-found/resource");
+  });
+});
+
+describe("find aliases", () => {
+  test("`--sport futbol` says what it resolved to and points at natural grass", async () => {
+    mockPortal();
+    const r = await run(["find", "--sport", "futbol", "--date", "2026-11-05", "--json"]);
+    expect(r.json.data).toMatchObject({ sport: "synthetic", sportInput: "futbol" });
+    const h = await run(["find", "--sport", "futbol", "--date", "2026-11-05"], { NO_JSON: "1" });
+    expect(h.stdout).toContain("--sport futbol = synthetic; para grama natural usa --sport natural");
+    const plain = await run(["find", "--sport", "pool", "--date", "2026-11-05", "--json"]);
+    expect(plain.json.data.sportInput).toBeUndefined();
+  });
+});
+
 describe("first run", () => {
   test("the first human command shows the welcome once and leaves a marker", async () => {
     mockPortal();

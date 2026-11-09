@@ -279,6 +279,13 @@ function portalFetch(sc: Scenario, calls: Call[]): FetchLike {
     }
     if (p === "/api/citizen-portal/pending-to-pay") return headers.Authorization ? json(200, { data: sc.pending ?? [] }) : json(401, {});
     if (p === "/api/citizen-portal/payments") return headers.Authorization ? paged(sc.payments ?? []) : json(401, {});
+    if (p.startsWith("/api/payment-gateway/status/")) {
+      const code = decodeURIComponent(p.split("/").pop() ?? "");
+      const hit = (sc.payments ?? []).find((x) => (x as Record<string, unknown>).payment_code === code) as Record<string, unknown> | undefined;
+      // The portal answers HTTP 500 for anything that is not a payment code (observed live with a booking number).
+      if (!hit) return json(500, { message: "Trying to get property of non-object" });
+      return json(200, { data: [{ code_payment: code, amount: "22800.00", currently: "COP", concept: hit.concept, date_payment: hit.payment_at ?? hit.created_at, transaccion_id_pse: "PSE-1", status_bank: hit.status === "APROBADO" ? "OK" : "NOT_AUTHORIZED", status: { id: hit.status === "APROBADO" ? 2 : 5, descripcion: hit.status === "APROBADO" ? "Aprobado" : "Fallido" }, method: { id: 1, Nombre: "pse" } }] });
+    }
     if (p === "/api/parks/tennis-courts") {
       // Laravel paginator, like the real portal: 10 per page unless `per_page` says otherwise.
       const rows = sc.courts ?? COURTS.data;

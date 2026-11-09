@@ -81,7 +81,7 @@ cupo find --sport pool --locality chapinero            # solo cerca de Chapinero
 cupo find --sport pool --provider idrd                 # solo el IDRD
 ```
 
-- `--sport`: `tennis` `padel` `pickleball` `synthetic` `natural` `pool` `grill` `gym` `coliseum` (también en español: `piscina`, `asador`, `gimnasio`, `coliseo`). Default `pool`.
+- `--sport`: `tennis` `padel` `pickleball` `synthetic` `natural` `pool` `grill` `gym` `coliseum` (también en español: `piscina`, `asador`, `gimnasio`, `coliseo`, `futbol` = sintética). Default `pool`. Cuando usas un alias, la salida dice a qué tipo se resolvió.
 - `--date`: `2026-11-07`, `hoy`, `mañana`, o `lun…dom` (próxima ocurrencia). Default mañana.
 - `--from` / `--to`: `6`, `6am`, `18`, `06:30`.
 - Entre paréntesis van los cupos cuando el espacio es compartido (piscinas, gimnasios). Las piscinas del IDRD se buscan carril por carril.
@@ -132,14 +132,14 @@ cupo book idrd:3032 --date dom --hour 17
 cupo book idrd:3032 --date dom --hour 17 --yes --confirm 3032@2026-11-08T17x1
 cupo idrd pay banks
 cupo idrd pay pse 875972 --bank 1007 --yes --open
-cupo idrd pay status e4334d5c-da2a-11f1-b009-0242c0a81f05
+cupo idrd pay status 875972
 ```
 
 1. La vista previa de `book` imprime el **intent** (`3032@2026-11-08T17x1`) que tienes que repetir en `--confirm`.
 2. Al reservar de verdad, el portal devuelve el **número de reserva**, el **valor** y hasta qué hora queda retenido el cupo: **15 minutos** desde la creación. Si no pagas en ese tiempo, la reserva se libera sola.
 3. `pay pse` crea la orden de pago en el banco que elijas (`pay banks` lista los códigos; `1007` es Bancolombia) e imprime el link PSE. Con `--open` lo abre en el navegador. Nadie más debe usar ese link.
 4. Pagas en tu banco. El CLI no interviene.
-5. `pay status` recibe el **código de pago** que imprimió `pay pse` (no el número de reserva) y lee el estado real en el portal: `Aprobado`. El comprobante queda en `https://portalciudadano.idrd.gov.co/app/pagos/comprobante/<código de pago>`.
+5. `pay status` lee el estado real en el portal: `Aprobado`, `Fallido` o pendiente. Acepta el **código de pago** que imprimió `pay pse` o directamente el **número de la reserva** (busca el código en tu historial). Si el pago fue aprobado imprime el link del comprobante.
 
 Si el banco rechaza la transacción, `cupo idrd pay history` lo muestra como `FALLIDO` / `NOT_AUTHORIZED`: no se cobró nada y, pasados los 15 minutos, la reserva se libera. Para volver a intentarlo hay que reservar de nuevo con `cupo book` y generar otro link.
 
@@ -206,8 +206,8 @@ El portal cambió su configuración de login. Borra `~/.cupo/web-client.json` y 
 **`rule/violation` o `slot/unavailable` al reservar.**
 El horario no cumple una regla del portal o ya lo tomó otra persona. El mensaje dice cuál fue el problema. Corre `cupo idrd slot list <cancha> --date <día> --free` para ver alternativas.
 
-**`upstream/error` con `HTTP 500` en `cupo idrd pay status`.**
-Le pasaste el número de reserva. Ese comando recibe el **código de pago** (el UUID que imprime `pay pse`), no la reserva. Si lo perdiste, `cupo idrd pay history` lista todos tus pagos con su código.
+**`not-found/resource` en `cupo idrd pay status <reserva>`.**
+Esa reserva no tiene pagos en tu historial: o todavía no generaste el link con `pay pse`, o el número no es tuyo. `cupo idrd pay history` lista todos tus pagos con su reserva y su código.
 
 **`cupo idrd pay history` muestra `FALLIDO` / `NOT_AUTHORIZED`.**
 El banco rechazó la transacción. El CLI generó el link correctamente y no se cobró nada. La retención de la reserva vence 15 minutos después de crearla: si ya venció, vuelve a reservar con `cupo book` y genera un link nuevo.

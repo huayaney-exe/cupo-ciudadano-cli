@@ -7,7 +7,7 @@ import { int, positional, requireStr, str } from "../core/args.js";
 import { AppError, fail } from "../core/errors.js";
 import { HOSTS } from "../core/http.js";
 import { appHome, paths, profileName } from "../core/paths.js";
-import { createBooking, getSchedule, listBanks, me, paymentStatus, transferBank, type BookingRequest } from "../idrd/api.js";
+import { createBooking, getSchedule, listBanks, me, paymentStatus, transferBank, type BookingRequest , paymentHistory} from "../idrd/api.js";
 import { accessToken } from "../idrd/auth.js";
 import { blocks, datesIn, hourSlots } from "../idrd/availability.js";
 import { CEFE_POOL_IDS, SPORTS } from "../idrd/sports.js";
@@ -295,8 +295,41 @@ export async function payPse(ctx: Ctx) {
 }
 
 export async function payStatus(ctx: Ctx) {
-  const code = positional(ctx.args, 0, "code");
+  const arg = positional(ctx.args, 0, "code");
   const { token } = await accessToken(ctx.flags.profile);
-  const st = await paymentStatus(token, code);
-  return { data: st, human: () => JSON.stringify(st, null, 2) };
+  let code = arg;
+  let resolvedFrom: string | null = null;
+  // A booking number instead of a payment code: look the code up in the account's payment history (latest, approved first).
+  if (/^\d+$/.test(arg)) {
+    const hist = (await paymentHistory(token)) as Array<Record<string, unknown>>;
+    const mine = hist.filter((h) => String(h.booking_id ?? "") === arg && typeof h.payment_code === "string");
+    mine.sort((a, b) => Number(b.status === "APROBADO") - Number(a.status === "APROBADO") || String(b.created_at ?? "").localeCompare(String(a.created_at ?? "")));
+    if (!mine[0]) fail("not-found/resource", `No hay pagos de la reserva ${arg} en tu historial.`, "Si acabas de crearla, genera el pago con `cupo idrd pay pse <reserva> --bank <código> --yes`. `cupo idrd pay history` lista todos tus pagos.");
+    code = String(mine[0].payment_code);
+    resolvedFrom = arg;
+  }
+  const raw = await paymentStatus(token, code);
+  const items = (Array.isArray(raw) ? raw : [raw]) as Array<Record<string, unknown>>;
+  const g = (o: unknown, path: string) => path.split(".").reduce<unknown>((acc, k) => (acc && typeof acc === "object" ? (acc as Record<string, unknown>)[k] : undefined), o);
+  const s = (v: unknown) => (v === null || v === undefined ? "" : String(v));
+  const approved = items.some((i) => /aprobado/i.test(s(g(i, "status.descripcion"))) || s(g(i, "status_bank")) === "OK");
+  const data = { code, bookingId: resolvedFrom ?? (items[0] ? s(g(items[0], "booking_id")) || null : null), approved, receiptUrl: approved ? `${RECEIPT_BASE}${code}` : null, payments: items };
+  return {
+    data,
+    human: () =>
+      items.map((i) => {
+        const st = s(g(i, "status.descripcion")) || s(g(i, "status")) || "—";
+        const line = /aprobado/i.test(st) ? ok(`✓ ${st}`) : /fallid|rechaz/i.test(st) ? danger(`✗ ${st}`) : warn(`! ${st}`);
+        return [
+          `${bold("Pago")} ${code}${resolvedFrom ? muted(` (reserva ${resolvedFrom})`) : ""}`,
+          `  Estado    ${line}${s(g(i, "status_bank")) ? muted(` · banco ${s(g(i, "status_bank"))}`) : ""}`,
+          `  Valor     $${s(g(i, "amount"))} ${s(g(i, "currently"))}`,
+          `  Fecha     ${s(g(i, "date_payment"))}`,
+          `  Concepto  ${s(g(i, "concept"))}`,
+          `  Medio     ${s(g(i, "method.Nombre")).toUpperCase()}${s(g(i, "transaccion_id_pse")) ? ` · ${s(g(i, "transaccion_id_pse"))}` : ""}`,
+          ...(approved ? [`  ${muted("Comprobante")} ${RECEIPT_BASE}${code}`] : []),
+        ].join("\n");
+      }).join("\n\n") || muted("El portal no devolvió información de ese pago."),
+    nextSteps: approved ? [] : [{ command: "cupo idrd pay history", description: "todos tus pagos con su estado" }],
+  };
 }

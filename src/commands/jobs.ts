@@ -42,7 +42,10 @@ function minutes(raw: string | undefined, def: number): number {
 const hm = (min: number) => `${String(Math.floor(min / 60)).padStart(2, "0")}:${String(min % 60).padStart(2, "0")}`;
 
 export async function find(ctx: Ctx) {
-  const sport = parseSport(str(ctx.args, "sport") ?? "pool");
+  const sportInput = (str(ctx.args, "sport") ?? "pool").trim().toLowerCase();
+  const sport = parseSport(sportInput);
+  // "futbol" is ambiguous in Bogotá's portal: synthetic fields are the common ask, natural grass is a different list.
+  const aliasNote = sportInput !== sport ? `--sport ${sportInput} = ${sport}${sportInput.startsWith("futbol") || sportInput.startsWith("fútbol") ? "; para grama natural usa --sport natural" : ""}` : null;
   const date = parseDate(str(ctx.args, "date") ?? addDays(bogotaNow().date, 1));
   const from = minutes(str(ctx.args, "from"), 0);
   const to = minutes(str(ctx.args, "to"), 24 * 60);
@@ -88,12 +91,12 @@ export async function find(ctx: Ctx) {
     }
   }));
   hits.sort((a, b) => a.free[0]!.start.localeCompare(b.free[0]!.start) || a.name.localeCompare(b.name));
-  const data = { date, sport, window: { from: hm(from), to: hm(to) }, providers: providers.map((p) => p.id), scanned, results: hits, failed };
+  const data = { date, sport, ...(aliasNote ? { sportInput } : {}), window: { from: hm(from), to: hm(to) }, providers: providers.map((p) => p.id), scanned, results: hits, failed };
   return {
     data,
     human: () => {
       const span = from === 0 && to === 1440 ? "todo el día" : `${hm(from)}–${hm(to)}`;
-      const head = bold(`${SPORTS[sport].label} · ${date} · ${span}`) + muted(` · ${providers.map((p) => `${p.name} (${scanned[p.id] ?? 0})`).join(" + ")}`);
+      const head = bold(`${SPORTS[sport].label} · ${date} · ${span}`) + muted(` · ${providers.map((p) => `${p.name} (${scanned[p.id] ?? 0})`).join(" + ")}`) + (aliasNote ? `\n${dim(`  ${aliasNote}`)}` : "");
       if (!hits.length) return `${head}\n\n  Sin cupo en esa franja.${failed.length ? dim(`\n  (${failed.map((f) => `${f.provider}: ${f.error}`).join("; ")})`) : ""}\n  ${dim(`Prueba otro día: cupo find --sport ${sport} --date ${addDays(date, 1)}`)}`;
       return `${head}\n\n${table(
         ["Dónde", "Localidad", "Libre", "Reservar con"],

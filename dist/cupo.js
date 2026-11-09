@@ -2319,11 +2319,12 @@ var COMMANDS = [
   },
   {
     name: "idrd pay status",
-    summary: "Estado de un pago PSE.",
-    args: [{ name: "code", description: "código de pago" }],
+    summary: "Estado de un pago PSE: aprobado, fallido o pendiente, con el comprobante si fue aprobado.",
+    args: [{ name: "code", description: "código de pago que imprimió `pay pse`, o el número de la reserva (se busca en tu historial)" }],
     trust: "T0",
     auth: true,
-    output: "object (respuesta del portal)"
+    output: "{code, bookingId, approved, receiptUrl, payments[]}",
+    examples: ["cupo idrd pay status 875972", "cupo idrd pay status e4334d5c-…"]
   },
   { name: "idrd pay pending", summary: "Pagos pendientes de tu cuenta en el portal.", trust: "T0", auth: true, output: "object[] (respuesta del portal)" },
   { name: "idrd pay history", summary: "Historial de pagos de tu cuenta.", trust: "T0", auth: true, output: "object[] (respuesta del portal)" },
@@ -3921,10 +3922,45 @@ ${muted("Ábrelo y paga en tu banco. Nadie más debe usarlo.")}` : `${ok("✓")}
   };
 }
 async function payStatus(ctx) {
-  const code = positional(ctx.args, 0, "code");
+  const arg = positional(ctx.args, 0, "code");
   const { token } = await accessToken(ctx.flags.profile);
-  const st = await paymentStatus(token, code);
-  return { data: st, human: () => JSON.stringify(st, null, 2) };
+  let code = arg;
+  let resolvedFrom = null;
+  if (/^\d+$/.test(arg)) {
+    const hist = await paymentHistory(token);
+    const mine = hist.filter((h) => String(h.booking_id ?? "") === arg && typeof h.payment_code === "string");
+    mine.sort((a, b) => Number(b.status === "APROBADO") - Number(a.status === "APROBADO") || String(b.created_at ?? "").localeCompare(String(a.created_at ?? "")));
+    if (!mine[0])
+      fail("not-found/resource", `No hay pagos de la reserva ${arg} en tu historial.`, "Si acabas de crearla, genera el pago con `cupo idrd pay pse <reserva> --bank <código> --yes`. `cupo idrd pay history` lista todos tus pagos.");
+    code = String(mine[0].payment_code);
+    resolvedFrom = arg;
+  }
+  const raw = await paymentStatus(token, code);
+  const items = Array.isArray(raw) ? raw : [raw];
+  const g = (o, path) => path.split(".").reduce((acc, k) => acc && typeof acc === "object" ? acc[k] : undefined, o);
+  const s = (v) => v === null || v === undefined ? "" : String(v);
+  const approved = items.some((i) => /aprobado/i.test(s(g(i, "status.descripcion"))) || s(g(i, "status_bank")) === "OK");
+  const data = { code, bookingId: resolvedFrom ?? (items[0] ? s(g(items[0], "booking_id")) || null : null), approved, receiptUrl: approved ? `${RECEIPT_BASE}${code}` : null, payments: items };
+  return {
+    data,
+    human: () => items.map((i) => {
+      const st = s(g(i, "status.descripcion")) || s(g(i, "status")) || "—";
+      const line = /aprobado/i.test(st) ? ok(`✓ ${st}`) : /fallid|rechaz/i.test(st) ? danger(`✗ ${st}`) : warn(`! ${st}`);
+      return [
+        `${bold("Pago")} ${code}${resolvedFrom ? muted(` (reserva ${resolvedFrom})`) : ""}`,
+        `  Estado    ${line}${s(g(i, "status_bank")) ? muted(` · banco ${s(g(i, "status_bank"))}`) : ""}`,
+        `  Valor     $${s(g(i, "amount"))} ${s(g(i, "currently"))}`,
+        `  Fecha     ${s(g(i, "date_payment"))}`,
+        `  Concepto  ${s(g(i, "concept"))}`,
+        `  Medio     ${s(g(i, "method.Nombre")).toUpperCase()}${s(g(i, "transaccion_id_pse")) ? ` · ${s(g(i, "transaccion_id_pse"))}` : ""}`,
+        ...approved ? [`  ${muted("Comprobante")} ${RECEIPT_BASE}${code}`] : []
+      ].join(`
+`);
+    }).join(`
+
+`) || muted("El portal no devolvió información de ese pago."),
+    nextSteps: approved ? [] : [{ command: "cupo idrd pay history", description: "todos tus pagos con su estado" }]
+  };
 }
 
 // src/commands/jobs.ts
@@ -3948,7 +3984,9 @@ function minutes(raw, def) {
 }
 var hm = (min) => `${String(Math.floor(min / 60)).padStart(2, "0")}:${String(min % 60).padStart(2, "0")}`;
 async function find(ctx) {
-  const sport = parseSport(str(ctx.args, "sport") ?? "pool");
+  const sportInput = (str(ctx.args, "sport") ?? "pool").trim().toLowerCase();
+  const sport = parseSport(sportInput);
+  const aliasNote = sportInput !== sport ? `--sport ${sportInput} = ${sport}${sportInput.startsWith("futbol") || sportInput.startsWith("fútbol") ? "; para grama natural usa --sport natural" : ""}` : null;
   const date = parseDate(str(ctx.args, "date") ?? addDays(bogotaNow().date, 1));
   const from = minutes(str(ctx.args, "from"), 0);
   const to = minutes(str(ctx.args, "to"), 24 * 60);
@@ -4005,12 +4043,13 @@ async function find(ctx) {
     }
   }));
   hits.sort((a, b) => a.free[0].start.localeCompare(b.free[0].start) || a.name.localeCompare(b.name));
-  const data = { date, sport, window: { from: hm(from), to: hm(to) }, providers: providers.map((p) => p.id), scanned, results: hits, failed };
+  const data = { date, sport, ...aliasNote ? { sportInput } : {}, window: { from: hm(from), to: hm(to) }, providers: providers.map((p) => p.id), scanned, results: hits, failed };
   return {
     data,
     human: () => {
       const span = from === 0 && to === 1440 ? "todo el día" : `${hm(from)}–${hm(to)}`;
-      const head = bold(`${SPORTS[sport].label} · ${date} · ${span}`) + muted(` · ${providers.map((p) => `${p.name} (${scanned[p.id] ?? 0})`).join(" + ")}`);
+      const head = bold(`${SPORTS[sport].label} · ${date} · ${span}`) + muted(` · ${providers.map((p) => `${p.name} (${scanned[p.id] ?? 0})`).join(" + ")}`) + (aliasNote ? `
+${dim(`  ${aliasNote}`)}` : "");
       if (!hits.length)
         return `${head}
 
